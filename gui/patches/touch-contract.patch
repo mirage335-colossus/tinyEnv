@@ -1,0 +1,37 @@
+--- include/gui/contract.hpp
++++ include/gui/contract.hpp
+@@ -147,12 +147,16 @@
+ struct ActivateRecord {std::string id;};
+ struct SubmitText {};
+ struct InvokeAction {std::string id;};
+-enum class PointerKind { click,double_click,move,wheel };
++// A press owns one pointer until release/cancel. Mouse click remains available
++// for semantic-only hosts; physical hosts must not synthesize a second click.
++enum class PointerKind { click,double_click,move,wheel,press,release,cancel };
+ struct PointerInput {
+     PointerKind kind=PointerKind::click;
+     Point position; // Absolute logical client coordinates.
+     double wheel_x=0,wheel_y=0; // Positive means right/up, in detents.
+     bool control=false,shift=false,alt=false;
++    std::uint64_t pointer_id=0; // Nonzero for a physical gesture; zero is legacy hover.
++    unsigned clicks=1; // Physical mouse release may select double-click semantics.
+ };
+ using Input=std::variant<Activate,SetChecked,EditText,ChooseOption,SelectRecord,ActivateRecord,SubmitText,InvokeAction,PointerInput>;
+ struct WidgetEvent {WidgetKey target;Input input;};
+@@ -360,9 +364,14 @@
+             for(const auto& action:w->state.actions)if(action.id==input.id)return action.enabled;
+             return false;
+         } else {
+-            switch(input.kind) {case PointerKind::click:case PointerKind::double_click:case PointerKind::move:case PointerKind::wheel:break;
++            switch(input.kind) {case PointerKind::click:case PointerKind::double_click:case PointerKind::move:case PointerKind::wheel:case PointerKind::press:case PointerKind::release:case PointerKind::cancel:break;
+                 default:return false;}
+-            return w->spec.pointer_input&&contains(a.clip,input.position)&&
++            // Captured coordinates remain absolute, even outside the clip. The
++            // stateful adapter separately verifies owner, target and generation.
++            const bool continuation=input.pointer_id!=0&&(input.kind==PointerKind::move||
++                input.kind==PointerKind::release||input.kind==PointerKind::cancel);
++            return w->spec.pointer_input&&(continuation||contains(a.clip,input.position))&&
++                std::isfinite(input.position.x)&&std::isfinite(input.position.y)&&
+                 std::isfinite(input.wheel_x)&&std::isfinite(input.wheel_y)&&
+                 (input.kind!=PointerKind::wheel||input.wheel_x!=0||input.wheel_y!=0);
+         }

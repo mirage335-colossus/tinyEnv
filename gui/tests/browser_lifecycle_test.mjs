@@ -1,0 +1,15 @@
+import assert from 'node:assert/strict';
+import {pathToFileURL} from 'node:url';
+import {resolve} from 'node:path';
+const {startPolling}=await import(pathToFileURL(resolve(process.argv[2])));
+const timers=new Map();let next=0,pending,requests=0;
+const scheduler={setTimeout(run,delay){assert.equal(delay,25);timers.set(++next,run);return next;},clearTimeout(id){timers.delete(id);}};
+const client={failed:false,closed:false,send(value){assert.deepEqual(value,{type:'poll'});++requests;return new Promise(resolve=>{pending=resolve;});}};
+const run=()=>{assert.equal(timers.size,1);const [id,callback]=timers.entries().next().value;timers.delete(id);callback();};
+const flush=async()=>{await Promise.resolve();await Promise.resolve();await Promise.resolve();};
+const stop=startPolling(client,scheduler);run();assert.equal(requests,1);assert.equal(timers.size,0);
+pending();await flush();assert.equal(timers.size,1);
+client.failed=true;run();assert.equal(requests,1);assert.equal(timers.size,1);
+client.failed=false;run();assert.equal(requests,2);stop();pending();await flush();assert.equal(timers.size,0);
+stop();assert.equal(timers.size,0);
+console.log('Single outstanding poll, failed-transport pause and owned timer teardown passed');

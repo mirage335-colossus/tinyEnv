@@ -1,0 +1,82 @@
+name: Focused Rev module diagnostic
+run-name: Rev modules / ${{ inputs.target }}
+'on':
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Native runner; Linux requires the selected compiler already installed
+        type: choice
+        default: windows-x86_64
+        options: [windows-x86_64, linux-x86_64, linux-aarch64]
+      linux_compiler:
+        description: Already installed Linux module compiler; unavailable tools fail without acquisition
+        type: choice
+        default: clang++-19
+        options: [clang++-19, g++-15]
+      gui_input:
+        description: Exact existing retained GUI selector JSON; no source or SDK rebuild
+        type: string
+        required: true
+      jobs:
+        description: Compile parallelism within this small module graph
+        type: choice
+        default: auto
+        options: [auto, '2', '4', '8']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  diagnose:
+    runs-on: ${{ inputs.target == 'windows-x86_64' && 'windows-2022' || inputs.target == 'linux-aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    # Each owned phase is capped at ten minutes; leave evidence-retention headroom.
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      GUI_INPUT: ${{ inputs.gui_input }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - name: Restore the exact existing retained GUI group
+      run: python .github/scripts/lifecycle.py gui-input
+    - if: inputs.target == 'windows-x86_64'
+      name: Select the installed native MSVC toolchain
+      shell: pwsh
+      run: ./tools/ci_windows.ps1 -Output build/rev-probe-toolchain.json
+    - id: probe
+      name: Compile four production modules and run both style regressions
+      shell: python
+      env:
+        PROBE_TARGET: ${{ inputs.target }}
+        PROBE_COMPILER: ${{ inputs.linux_compiler }}
+        PROBE_JOBS: ${{ inputs.jobs }}
+      run: |
+        import os, platform, subprocess, sys
+        target = os.environ['PROBE_TARGET']
+        machine = platform.machine().lower()
+        expected = {'windows-x86_64': ('Windows', ('amd64', 'x86_64')),
+                    'linux-x86_64': ('Linux', ('x86_64', 'amd64')),
+                    'linux-aarch64': ('Linux', ('aarch64', 'arm64'))}[target]
+        if platform.system() != expected[0] or machine not in expected[1]:
+            raise RuntimeError('Selected diagnostic target differs from the native runner')
+        compiler = 'cl.exe' if target == 'windows-x86_64' else os.environ['PROBE_COMPILER']
+        subprocess.run([sys.executable, '-B', 'tools/rev_probe.py',
+            '--gui-input-group', 'build/gui-group', '--compiler', compiler,
+            '--jobs', os.environ['PROBE_JOBS'], '--output', 'build/rev-probe'], check=True)
+    - if: always() && hashFiles('build/rev-probe/result.json') != ''
+      name: Retain joined diagnostic evidence using the existing draft bundle transport
+      shell: python
+      env:
+        BUNDLE_NAME: rev-probe-${{ inputs.target }}-${{ github.run_attempt }}-diagnostics
+      run: |
+        import os, subprocess, sys
+        sys.path.insert(0, 'tools')
+        import rev_probe
+        os.environ['BUNDLE_PATHS'] = rev_probe.retained_paths('build/rev-probe')
+        subprocess.run([sys.executable, '-B', '.github/scripts/lifecycle.py', 'bundle-store'], check=True)

@@ -1,0 +1,25 @@
+--- include/gui/terminal.hpp
++++ include/gui/terminal.hpp
+@@ -343,12 +343,18 @@
+                 }
+             }
+         }
+-        clip_=saved;
+         if(focused()==widget.spec.key&&!widget.spec.text_policy.read_only) {
+             const auto caret=editor_caret_position(widget,selection.caret);
+-            ink_.foreground=snapshot().palette.accent;
+-            put(first_column(box.x+caret.x-offset.x),first_row(box.y+caret.y-offset.y),'|');
+-        }
++            const auto x=first_column(box.x+caret.x-offset.x),y=first_row(box.y+caret.y-offset.y);
++            const Point center{origin_.x+(double(x)+0.5)*cell_width,origin_.y+(double(y)+0.5)*cell_height};
++            if(x>=0&&y>=0&&x<int(columns_)&&y<int(rows_-1)&&contains(clip_,center)) {
++                // A block caret changes only cell colors: placeholder and text
++                // glyphs, including literal escape representations, stay intact.
++                auto& ink=inks_[std::size_t(y)][std::size_t(x)];
++                std::swap(ink.foreground,ink.background);
++            }
++        }
++        clip_=saved;
+     }
+     void draw_list(const Widget& widget,Rect bounds) {
+         const auto& state=widget.state;

@@ -1,0 +1,18 @@
+--- a/tests/contract_test.cpp
++++ b/tests/contract_test.cpp
+@@ -120,10 +120,13 @@
+     MemoryAdapter tiny({},10);rejects([&]{tiny.present(s);});
+ }
+ void synchronous_text_acknowledgement() {
+-    MemoryAdapter adapter([&](const Event& event) {
++    MemoryAdapter* active=nullptr;
++    MemoryAdapter adapter([&active](const Event& event) {
++        check(active!=nullptr,"Callback ran before adapter construction completed");
+         const auto& edit=std::get<EditText>(std::get<WidgetEvent>(event).input);
+-        auto next=adapter.snapshot();next.widgets[1].state.text=edit.value;adapter.present(std::move(next));
++        auto next=active->snapshot();next.widgets[1].state.text=edit.value;active->present(std::move(next));
+     });
++    active=&adapter;
+     adapter.present(fixture());adapter.text_selection({"editor",1},{0,2});
+     // The supplied key is borrowed from storage replaced inside the callback.
+     check(adapter.replace(adapter.snapshot().widgets[1].spec.key,"new")==Delivery::delivered,

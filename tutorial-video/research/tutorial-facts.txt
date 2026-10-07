@@ -1,0 +1,142 @@
+Software Foundation video research — read-only source inspection, 2026-10-06
+
+Viewer-facing terminology: Software Foundation; independent project; ordinary C17,
+C++20 and Rust source; visual forms; typed MIMO stream graphs. Keep private checkout
+paths out of shots. These notes are production evidence, not narration.
+
+SOURCE AND ORIENTATION
+- README.md:152-222: fork.sh creates an independent depth-one main checkout, removes
+  configured remotes/tracking, preserves the original baseline commit, and never
+  commits. Local modifications and untracked inputs are excluded. The destination
+  must be absent; parent must already exist.
+- Normal fresh-project command from a foundation checkout:
+  PROJECT_NAME='my-project' PROJECT_AUTHOR='my-screenname' ./fork.sh
+- README.md:241-251: replace the small example app, define supported environments,
+  fill records/recipes with real pinned inputs, keep focused development separate
+  from complete qualification, reuse GUI and coordination boundaries as applicable.
+- AGENTS.md first paragraph requires documentation index and supported build entry.
+- docs/README.md:9-22 is the best navigable newcomer map. Emphasize Start an independent
+  project, Build/run, Build/SDK, Optional graphical editor, Interfaces, Verification,
+  and Delivery. docs/architecture.md gives the directory map; docs/requirements.md
+  and docs/practice-map.json map requirements to implementation/tests.
+- COMPILE, COMPILE-gui, COMPILE-web, COMPILE-editor are short command recipes.
+
+PORTABILITY AND RETAINED INPUTS
+- README.md:15-44 shows the same Entry list application in seven hosts: FLTK, Rev,
+  SDL, framebuffer, hosted browser, browser Wasm, terminal UI.
+- docs/gui-boundary.md:7-18,53-70: features/layout/event decisions live once above
+  generic adapters. One library/CMake graph is reused; distinct target platforms
+  need separate build trees.
+- docs/sdk.md:3-28: SDK = host tools plus controlled target environment. Native,
+  Windows and Wasm prepared inputs have explicit scopes. Compiled SDK archives are
+  generated outputs, not committed inputs. A producer is not universal platform proof.
+- docs/offline-builds.md:3-33: normal builds consume complete retained bytes and
+  do not fetch tools/crates/supplier checkouts. A URL or hash alone is insufficient.
+  Runtime hosts still require declared libc/display/browser/driver services.
+- docs/latest-release.md:3-17,42-55,59-85: GitHub Actions Latest entry combines frozen
+  source, exact already-retained SDKs, complete regression, build, signed native
+  packages, remote-byte certification and promotion. No silent SDK preparation.
+- .github/WORKFLOWS.md:65-90: SDK maintenance, SDK application, certify/promote,
+  Latest. APT/pacman discover assets through releases/latest/download; Gentoo follows
+  Latest then pins exact tag. docs/distribution-release.md is the native-client home.
+- Say: "GitHub Releases can serve as the package repository for the project's signed
+  distro channels." Avoid implying every GitHub release is an arbitrary distro repo.
+
+EDITOR BUILD AND SAFE RECORDING
+- editor/README.md:13-17: authoring hosts = FLTK, Rev, SDL/framebuffer. Editor is a
+  separate optional CMake project and is absent from normal application/release graph.
+- editor/README.md:21-29 and COMPILE-editor:13-17:
+  ./build.sh editor build dev --backend fltk --build-dir build/editor-fltk
+  ./build/editor-fltk/foundation-editor-fltk
+  Requires C++20/CMake >=3.24/Ninja/Python >=3.9/FLTK; no Rust/compiler server/network.
+- Prepared SDK variant (native Linux only, editor/README.md:44-57):
+  ./build.sh editor build dev --backend fltk --sdk /absolute/retained/sdk --build-dir build/editor-fltk-sdk
+  ./build/editor-fltk-sdk/foundation-editor-fltk
+- Existing retained binary observed at build/editor-fltk-sdk/foundation-editor-fltk.
+  Do not run editor.sh in the source checkout: it can build if the binary is missing.
+- editor/README.md:77-79 and examples/simple-c/README.md:49-52: Examples opens actual
+  editable directories; Save writes design/generated/source. Record with a private
+  standalone copy and all output/build recipes redirected there. Opening/preview
+  alone writes no files and executes no project code.
+- Example Build/Run recipe paths assume ordinary CMake configuration has happened.
+  Run builds first and will not launch after a failed build (editor/README.md:231-234).
+
+RECOMMENDED FOUR-MINUTE TUTORIAL SHOTS
+1. (~0:00-0:35) README seven-host montage, docs index, fresh-project command. Mention
+   retained toolchains/dependencies and explicit Actions release workflow.
+2. (~0:35-1:25) Isolated Simple C example Forms view. Choose widget kind > Add widget,
+   drag/resize, edit label/property > Apply (Enter also applies), select Event and
+   double-click Run samples/Edit code. The source window edits events.c. Show
+   simple_c_on_run (events.c:20-33): dropdown -> disable -> processing -> helper
+   updates text -> enable. C17 callback facade crosses C++ GUI boundary. Save design
+   generates retained C++ without rewriting handwritten C.
+3. (~1:25-2:00) Simple C++ event source events.cpp:16-27 or show its short snippet.
+   Ordinary handler uses Services/Ui/input, calls run_samples and helper. C/C++
+   calls are normal linkable functions; Rust is callable through an explicit C ABI.
+4. (~2:00-2:35) Simple C Source/Gain/Collector graph. Drag blocks, click/drag output
+   socket to input. Double-click Gain -> signal.c -> simple_c_apply_gain. Port type
+   must match. Show Advanced MIMO graph: two inputs/four outputs at unequal rates.
+5. (~2:35-3:20) Rust DSP -> Flows -> Rust FIR / decimate 2 -> double-click -> dsp.rs
+   process_samples (23-47). FIR [1/4,1/2,1/4], decimates by 2, persists per-stream
+   history across chunks, reports consumed and produced counts. Show C ABI wrapper
+   dsp.rs:55-85 and dsp.h:30-32. C++ factory bridges it to the generated graph.
+6. (~3:20-3:50) Files -> CMakeLists.txt: ordinary sources remain normal build inputs.
+   C++: target_sources(foundation-editor-simple PRIVATE extra.cpp)
+   C: target_sources(simple-c-behavior PRIVATE extra.c)
+   Keep declaration in a header and include it in caller. True C target enables
+   LANGUAGES C CXX (simple-c/CMakeLists.txt:2), compiles C17 separately (:17-19).
+   Rust optional DSP: add extra.rs, add mod extra; to dsp.rs, and add extra.rs to
+   CMake custom-command DEPENDS alongside dsp.rs (:29-34), then rebuild archive/link.
+7. (~3:50-4:00) Docs index pointers: editor/README.md, building.md, sdk.md, testing.md,
+   distribution-release.md. Keep the final command/example readable long enough.
+
+SHORT EXAMPLE COMMANDS (execute only in isolated recording copy)
+cmake -S editor/examples/simple-c -B build/editor-simple-c-check -G Ninja
+cmake --build build/editor-simple-c-check --parallel 2
+build/editor-simple-c-check/foundation-editor-simple-c
+
+cmake -S editor/examples/rust-dsp -B build/editor-rust-dsp -G Ninja
+cmake --build build/editor-rust-dsp --parallel 2
+build/editor-rust-dsp/foundation-editor-rust-dsp
+
+Rust DSP accepts -DFOUNDATION_RUST_DSP_RUSTC=/absolute/path/to/existing/rustc if absent
+from PATH. Its CMakeLists.txt:29-34 invokes rustc --crate-type staticlib --edition 2021
+-C panic=abort -C opt-level=2; there are no external crates/Cargo/downloads.
+
+HONEST CLAIM BOUNDARIES
+- All tutorial examples supplied are display-free reference applications. Editor
+  Preview displays form layout without running application handlers. Do not depict
+  Preview as a live sample-processing GUI. Build/Run prints checked sample values;
+  native host composition is possible but not the included default example route.
+- Editor Forms edits JSON-defined/generated forms, and does not import handwritten
+  C++ app layouts (editor/README.md:152-159). It is an authoring tool, not a parser,
+  language server or restricted language; source files stay independently editable.
+- Generated layouts can be presented through any supported adapter. Editor itself
+  has only three host choices. Windows editor source adapters exist; native Windows
+  editor execution remains pending (editor/README.md:53-55).
+- Rust DSP has no Forms/events, only a flow. To show direct event-to-Rust capability,
+  use the ordinary C ABI call as a clearly labeled code explanation or construct and
+  validate a fresh combined project; do not imply this example already supplies it.
+- Main Rust component supports native Linux x64/ARM64, Windows x64 MSVC, Emscripten.
+  Main workspace deliberately allows one dependency-free Rust crate; add module files
+  to existing crate (mod helper;), not a new external crate without adapting policy.
+  cmake/RustComponent.cmake:143-145 tracks .rs inputs; tools/rust_build.py:335-355
+  rejects added workspace members/dependencies/macros/build scripts.
+- Existing Rust static ABI does not imply memory safety at arbitrary FFI boundaries.
+  Caller owns live/disjoint buffers, panic aborts, no borrow survives the call.
+- Computer vision is a supported kind of custom typed processing block, not a built-in
+  computer-vision library or demonstrated included algorithm. Say "bring your signal
+  processing or computer-vision algorithms" rather than claiming a supplied CV suite.
+- "Two weeks ahead" and "one hour" are maintainer experience/estimates supplied by
+  user, not measured generalized benchmarks. Present them as intended benefits
+  without attributing an opinion to the team, and do not guarantee
+  the same savings or that all future difficult projects have no new pain points.
+- Prepared SDK retention reduces recurring supplier/network dependence, but the
+  documented host requirements, supplier licenses and platform qualification remain.
+
+CURRENT EDITORIAL SOURCE
+The capabilities narration is retained in stories/capabilities.json. It leads
+with the intended reduction in repeated development from roughly two weeks to
+hours, then ordinary C/C++/Rust code gaining a visual event-driven GUI.
+Future-project reuse is inclusive. Figures are presented as intended benefits
+without attributing an opinion to the team.

@@ -1,0 +1,232 @@
+--- backends/web/renderer.mjs
++++ backends/web/renderer.mjs
+@@ -16,11 +16,21 @@
+ // Serial transport preserves command order and bounds pending work. On an
+ // uncertain delivery, retry uses the identical epoch/sequence/payload. Never
+ // reconnect by replaying commands into a fresh application session.
++export const MAX_OPERATION_BYTES=1024*1024,MAX_QUEUED_BYTES=8*1024*1024;
++const serializedOperation=operation=>{
++  const text=JSON.stringify(operation);
++  if(typeof text!=="string"||text.length>MAX_OPERATION_BYTES-512||encoder.encode(text).length>MAX_OPERATION_BYTES-512)
++    throw Error("Input exceeds the operation byte limit.");
++  return text;
++};
+ export class Client {
+   constructor(exchange, apply, status = () => {}) {
+     this.exchange = exchange; this.apply = apply; this.status = status;
+     this.queue = []; this.running = false; this.failed = false;
+-    this.epoch = null; this.ack = 0n; this.state = null; this.inflight = null;
++    this.epoch = null; this.ack = 0n; this.state = null; this.inflight = null; this.closed = false;
++    // Includes the in-flight retry reservation. Dynamic operations reserve a
++    // full request; the renderer bounds its captured editor value separately.
++    this.queuedBytes = 0;
+   }
+   accept(state) {
+     if (this.epoch !== null && state.epoch !== this.epoch) throw Error("Session changed; reload to start a new session.");
+@@ -33,50 +43,76 @@
+   }
+   send(operation, coalesce = null) {
+     return new Promise((resolve, reject) => {
+-      if (coalesce) {
+-        const previous = this.queue.find(task => task.coalesce === coalesce);
+-        if (previous) {
+-          if(previous.completions.length>=128){
+-            const error=Error("Input queue is full; wait for the backend.");this.status(error.message);reject(error);return;
+-          }
+-          previous.operation = operation; previous.completions.push({resolve, reject}); this.pump(); return;
++      if (this.closed) { reject(Error("Session closed")); return; }
++      let bytes=MAX_OPERATION_BYTES;
++      try {
++        if(typeof operation!=="function"){
++          const text=serializedOperation(operation);bytes=encoder.encode(text).length+512;
++          operation=JSON.parse(text); // Caller mutation cannot alter a queued/retried command.
+         }
+-      }
+-      if (this.queue.length >= 128) {
++      }catch(error){this.status(error.message);reject(error);return;}
++      const last=this.queue.at(-1),previous=coalesce&&last?.coalesce===coalesce?last:null;
++      if(this.queuedBytes-(previous?.bytes||0)+bytes>MAX_QUEUED_BYTES||
++          (previous?previous.completions.length>=128:this.queue.length>=128)){
+         const error=Error("Input queue is full; wait for the backend.");this.status(error.message);reject(error);return;
+       }
+-      this.queue.push({operation, coalesce, completions: [{resolve, reject}]});
+-      this.pump();
++      if(previous){
++        this.queuedBytes+=bytes-previous.bytes;previous.bytes=bytes;previous.operation=operation;
++        previous.completions.push({resolve,reject});this.pump();return;
++      }
++      this.queuedBytes+=bytes;
++      this.queue.push({operation,coalesce,bytes,completions:[{resolve,reject}]});this.pump();
+     });
+   }
+   async pump() {
+-    if (this.running || this.failed || !this.state) return;
++    if (this.closed || this.running || this.failed || !this.state) return;
+     this.running = true;
+     try {
+       while (this.inflight || this.queue.length) {
+         if (!this.inflight) {
+-          const task = this.queue.shift();
+-          const operation = typeof task.operation === "function" ? task.operation(this.state.snapshot) : task.operation;
+-          this.inflight = {task, envelope: {epoch: this.epoch, seq: String(this.ack + 1n), operation}};
++          const task=this.queue[0];
++          try {
++            const operation=typeof task.operation==="function"?JSON.parse(serializedOperation(task.operation(this.state.snapshot))):task.operation;
++            const envelope={epoch:this.epoch,seq:String(this.ack+1n),operation};
++            const text=JSON.stringify(envelope);
++            if(text.length>MAX_OPERATION_BYTES||encoder.encode(text).length>MAX_OPERATION_BYTES)throw Error("Input envelope exceeds the byte limit.");
++            this.inflight={task,envelope};this.queue.shift();
++          }catch(error){
++            // Local preparation failure has no uncertain backend side effect.
++            // Reject while the task is still owned; never strand its completions.
++            this.queue.shift();this.queuedBytes-=task.bytes;
++            for(const completion of task.completions)completion.reject(error);
++            this.status(error.message);continue;
++          }
+         }
+         const {task, envelope} = this.inflight;
+         const state = await this.exchange(envelope);
++        if (this.closed) return;
+         if (state.epoch !== this.epoch || BigInt(state.ack) < BigInt(envelope.seq)) throw Error(state.error || "Operation was not acknowledged.");
+-        this.accept(state); this.inflight = null;
++        this.accept(state); this.inflight = null;this.queuedBytes-=task.bytes;
+         for (const completion of task.completions) completion.resolve(state);
+       }
+     } catch (error) {
++      if(this.closed)return;
+       this.failed = true; this.status(`Connection paused: ${error.message}. Retry preserves operation identity.`, true);
+     } finally { this.running = false; }
+   }
+-  retry() { this.failed = false; this.status(""); this.pump(); }
++  close() {
++    if(this.closed)return;this.closed=true;
++    const tasks=[...this.queue];if(this.inflight)tasks.push(this.inflight.task);
++    this.queue=[];this.inflight=null;this.queuedBytes=0;
++    for(const task of tasks)for(const completion of task.completions)completion.reject(Error("Session closed"));
++  }
++  retry() { if(this.closed)return;this.failed = false; this.status(""); this.pump(); }
+ }
+ 
+ export class Renderer {
+   constructor(root, pages, send, document = globalThis.document) {
+     this.root = root; this.pages = pages; this.send = send; this.document = document;
+     this.nodes = new Map(); this.pendingEdits = new Map(); this.editVersion = 0;
+-    this.measurements = new Set(); this.lastFocus = null; this.snapshot = null;
++    this.measurements = new Set(); this.lastFocus = null; this.snapshot = null; this.pointerSerial = 0n;
++    this.activePointers = new Set();this.pointerCancelEpoch=0n;
++    for(const kind of ["blur","pagehide"])this.document.defaultView?.addEventListener(kind,()=>this.cancelPointers());
+     this.root.addEventListener("wheel", event => this.groupWheel(event), {passive: false});
+     this.document.addEventListener("keydown", event => {
+       if (event.defaultPrevented || event.isComposing || !this.snapshot) return;
+@@ -87,6 +123,7 @@
+       }
+     });
+   }
++  cancelPointers() { ++this.pointerCancelEpoch;for(const cancel of [...this.activePointers])cancel(); }
+   element(tag, className, parent) {
+     const element = this.document.createElement(tag);
+     if (className) element.className = className;
+@@ -177,14 +214,51 @@
+     }
+     const pointer = (event, kind) => {
+         if (!entry.widget.pointerInput) return;
++        const owner = entry.pointerOwner;
++        if (kind === "press") {
++          if (owner !== undefined || event.isPrimary === false || event.button !== 0) return;
++          if (this.pointerSerial === 18446744073709551615n) return;
++          entry.doubleEpoch=undefined;entry.pointerOwner = event.pointerId;
++          entry.pointerToken = String(++this.pointerSerial);
++          try { node.setPointerCapture(event.pointerId); }
++          catch { entry.pointerOwner = undefined; return; }
++          this.activePointers.add(entry.cancelPointer);
++        } else if (kind === "release" || kind === "cancel" || (kind === "move" && owner !== undefined)) {
++          if (owner !== event.pointerId) return;
++        }
++        if (kind === "release" || kind === "cancel") {entry.doubleEpoch=kind==="release"?this.pointerCancelEpoch:undefined;entry.pointerOwner = undefined;this.activePointers.delete(entry.cancelPointer);}
++        if (kind !== "wheel" && kind !== "move") event.preventDefault();
+         const bounds = this.root.getBoundingClientRect();
+         if (kind === "wheel") event.preventDefault();
+-        act("pointer", {kind, x: event.clientX - bounds.left, y: event.clientY - bounds.top,
++        act("pointer", {kind, pointerId: (kind === "wheel" || (kind === "move" && entry.pointerOwner === undefined) ? "0" : entry.pointerToken), x: event.clientX - bounds.left, y: event.clientY - bounds.top,
+           wheelX: kind === "wheel" ? event.deltaX / 100 : 0, wheelY: kind === "wheel" ? -event.deltaY / 100 : 0,
+           control: event.ctrlKey, shift: event.shiftKey, alt: event.altKey}, kind === "move" ? `pointer:${identity(entry.widget.key)}` : null);
+     };
+-    node.addEventListener("click", event => pointer(event, "click"));
+-    node.addEventListener("dblclick", event => pointer(event, "double"));
++    entry.cancelPointer=()=>{
++      if(entry.pointerOwner===undefined)return;
++      const owner=entry.pointerOwner;entry.pointerOwner=undefined;entry.doubleEpoch=undefined;this.activePointers.delete(entry.cancelPointer);
++      try{node.releasePointerCapture(owner);}catch{}
++      act("pointer",{kind:"cancel",pointerId:entry.pointerToken,x:0,y:0,wheelX:0,wheelY:0,control:false,shift:false,alt:false});
++    };
++    node.addEventListener("pointerdown", event => pointer(event, "press"));
++    node.addEventListener("pointerup", event => pointer(event, "release"));
++    node.addEventListener("pointercancel", event => pointer(event, "cancel"));
++    node.addEventListener("lostpointercapture", event => pointer(event, "cancel"));
++    // Raw gesture surfaces consume their browser-synthesized semantic clicks.
++    // Ordinary native controls keep their existing click, text and IME paths.
++    for (const kind of ["click", "dblclick"]) node.addEventListener(kind, event => {
++      if (entry.widget.pointerInput) {
++        event.preventDefault(); event.stopImmediatePropagation();
++        // Preserve the explicit legacy double semantic after contact releases;
++        // ordinary controls still own their native click/activation behavior.
++        if(kind==="dblclick"&&entry.pointerOwner===undefined&&entry.doubleEpoch===this.pointerCancelEpoch){
++          entry.doubleEpoch=undefined;
++          const bounds=this.root.getBoundingClientRect();
++          act("pointer",{kind:"double",pointerId:"0",x:event.clientX-bounds.left,y:event.clientY-bounds.top,
++            wheelX:0,wheelY:0,control:event.ctrlKey,shift:event.shiftKey,alt:event.altKey});
++        }
++      }
++    }, true);
+     node.addEventListener("pointermove", event => pointer(event, "move"));
+     node.addEventListener("wheel", event => pointer(event, "wheel"), {passive: false});
+     node.addEventListener("contextmenu",event=>{if(entry.widget.kind===7&&entry.widget.actions.length){event.preventDefault();act("popupOpen");}});
+@@ -211,6 +285,12 @@
+   }
+   edit(entry) {
+     const key = entry.widget.key, id = identity(key), version = ++this.editVersion, value = entry.control.value;
++    if(value.length>MAX_OPERATION_BYTES-512||encoder.encode(JSON.stringify(value)).length>MAX_OPERATION_BYTES-512){
++      entry.control.value=entry.widget.text;
++      // Use the Client's ordinary rejection/status path without retaining a
++      // closure over oversized provisional text or disturbing earlier edits.
++      this.send({type:"edit",key,value,base:""},`edit:${id}`).catch(()=>{});return;
++    }
+     this.pendingEdits.set(id, version);
+     this.send(snapshot => ({type: "edit", key, value,
+       base: snapshot.widgets.find(widget => identity(widget.key) === id)?.text ?? ""}), `edit:${id}`)
+@@ -234,6 +314,8 @@
+   }
+   update(entry, widget) {
+     entry.widget = widget; entry.updating = true;
++    if(!widget.visible||!widget.enabled||!widget.pointerInput)entry.cancelPointer();
++    entry.node.style.touchAction = widget.pointerInput ? "none" : "";
+     const {node, control} = entry, [x,y,width,height] = widget.bounds, [cx,cy,cw,ch] = widget.clip;
+     node.style.left = `${x}px`; node.style.top = `${y}px`; node.style.width = `${width}px`; node.style.height = `${height}px`;
+     node.style.clipPath = `inset(${Math.max(0,cy-y)}px ${Math.max(0,x+width-cx-cw)}px ${Math.max(0,y+height-cy-ch)}px ${Math.max(0,cx-x)}px)`;
+@@ -341,9 +423,9 @@
+     const retained=new Set();
+     for(const [index,widget] of snapshot.widgets.entries()){const id=identity(widget.key);retained.add(id);
+       let entry=this.nodes.get(id);if(!entry){entry=this.create(widget);this.nodes.set(id,entry);}this.update(entry,widget);entry.node.style.zIndex=String(index+1);}
+-    for(const [id,entry] of this.nodes)if(!retained.has(id)){entry.node.remove();this.nodes.delete(id);this.pendingEdits.delete(id);}
++    for(const [id,entry] of this.nodes)if(!retained.has(id)){entry.cancelPointer();entry.node.remove();this.nodes.delete(id);this.pendingEdits.delete(id);}
+     this.syncFocus();
+-    if(snapshot.closed){this.root.setAttribute("inert","");for(const dialog of this.document.querySelectorAll?.('.service-prompt')||[])dialog.close();}
++    if(snapshot.closed){this.cancelPointers();this.root.setAttribute("inert","");for(const dialog of this.document.querySelectorAll?.('.service-prompt')||[])dialog.close();}
+     this.renderPopup(snapshot.popup);
+     this.measure(snapshot.measurements);
+   }
+@@ -404,10 +486,14 @@
+     let settled=false;
+     const finish=(status,value="",failure="")=>{
+       if(settled)return;settled=true;
++      host.signal?.removeEventListener("abort",abort);
+       if(dialog.open)dialog.close();dialog.remove();
+       if(previous?.isConnected)previous.focus({preventScroll:true});
+       resolve({...base,status,value,error:failure});
+     };
++    const abort=()=>finish("cancelled");
++    host.signal?.addEventListener("abort",abort,{once:true});
++    if(host.signal?.aborted){abort();return;}
+     const submit=()=>{
+       const value=input.value;
+       if(BigInt(encoder.encode(value).length)>BigInt(service.byteLimit)){error.textContent=`Text exceeds the ${service.byteLimit}-byte limit.`;input.focus();return;}

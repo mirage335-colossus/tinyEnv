@@ -1,0 +1,33 @@
+APPLICATION BACKEND COMPARISON — VIDEO SOURCE NOTES
+Reviewed 2026-10-07, America/Chicago.
+
+The committed docs/screenshots/ gallery contains seven actual application views:
+FLTK, Rev, SDL window, framebuffer, hosted browser, browser Wasm, terminal TUI.
+The ten-file gallery verifies with tools/screenshots.py verify docs/screenshots.
+Source commit: 2e33720a73f0686dc1ffe72992dfb52e472cd059 (2026-10-05).
+Capture run: 37383282720, attempt 1. Core provider: Rust/C++.
+The gallery is an appearance snapshot; broad functional qualification is separate.
+
+Narrative evidence:
+- docs/gui-boundary.md:7: shared state, commands, labels, availability, rows,
+  menus, layout and service intent; adapters interpret public declarations/input.
+- docs/gui-boundary.md:35: source boundary checks reinforce application/backend
+  separation; gui/shared/application.hpp exposes only gui::Adapter.
+- docs/gui-boundary.md:53: one shared definition/behavior reaches all seven hosts.
+- docs/gui-audit.md:24: host route table; generic boundary vocabulary.
+- docs/screenshots.md:69: hosted browser and Wasm are independently captured modes
+  with identical initial image bytes and geometry, using the same visual renderer.
+
+Four readable comparisons: FLTK/Rev, SDL/framebuffer, hosted browser/browser Wasm,
+then FLTK/terminal TUI. Preserve complete image contents/aspect ratios and label
+all modes explicitly. Preserve the terminal status row and border. Composition may
+scale for video display; original source PNG bytes remain unchanged.
+
+These are the application hosts, not all optional-editor hosts. The editor itself
+currently uses FLTK, Rev and SDL/framebuffer. Existing public widget capabilities
+can share feature/layout changes; new primitives or services may require extending
+the generic contract and adapters. Do not imply every platform has every widget,
+that the gallery qualifies all operating systems, or that all pixels are identical.
+
+The generator and pipeline retain input, font, source and output hashes locally.
+Production source lives under tutorial-video; docs/screenshots is read-only input.

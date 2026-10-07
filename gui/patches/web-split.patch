@@ -1,0 +1,202 @@
+--- renderer-services.mjs
++++ renderer_dom.mjs
+@@ -1,4 +1,4 @@
+-import {executeFileService} from './file_services.mjs';
++import {MAX_OPERATION_BYTES} from './browser_limits.mjs';
+ // Generic DOM mechanics for the shared boundary. Application state, widget
+ // eligibility, layout, stable IDs and edit validation remain in C++.
+ export const identity = key => JSON.stringify([key.id, key.generation]);
+@@ -14,109 +14,16 @@
+   return offset;
+ }
+ 
+-// Serial transport preserves command order and bounds pending work. On an
+-// uncertain delivery, retry uses the identical epoch/sequence/payload. Never
+-// reconnect by replaying commands into a fresh application session.
+-export const MAX_OPERATION_BYTES=1024*1024,MAX_QUEUED_BYTES=8*1024*1024;
+-const serializedOperation=operation=>{
+-  const text=JSON.stringify(operation);
+-  if(typeof text!=="string"||text.length>MAX_OPERATION_BYTES-512||encoder.encode(text).length>MAX_OPERATION_BYTES-512)
+-    throw Error("Input exceeds the operation byte limit.");
+-  return text;
+-};
+-export class Client {
+-  constructor(exchange, apply, status = () => {}) {
+-    this.exchange = exchange; this.apply = apply; this.status = status;
+-    this.queue = []; this.running = false; this.failed = false;
+-    this.epoch = null; this.ack = 0n; this.state = null; this.inflight = null; this.closed = false;
+-    // Includes the in-flight retry reservation. Dynamic operations reserve a
+-    // full request; the renderer bounds its captured editor value separately.
+-    this.queuedBytes = 0;
+-  }
+-  accept(state) {
+-    if (this.epoch !== null && state.epoch !== this.epoch) throw Error("Session changed; reload to start a new session.");
+-    const ack = BigInt(state.ack);
+-    if (ack < this.ack) return false;
+-    this.epoch = state.epoch; this.ack = ack; this.state = state;
+-    this.apply(state);
+-    if (state.error && state.error !== "Duplicate operation ignored") this.status(state.error);
+-    return true;
+-  }
+-  send(operation, coalesce = null) {
+-    return new Promise((resolve, reject) => {
+-      if (this.closed) { reject(Error("Session closed")); return; }
+-      let bytes=MAX_OPERATION_BYTES;
+-      try {
+-        if(typeof operation!=="function"){
+-          const text=serializedOperation(operation);bytes=encoder.encode(text).length+512;
+-          operation=JSON.parse(text); // Caller mutation cannot alter a queued/retried command.
+-        }
+-      }catch(error){this.status(error.message);reject(error);return;}
+-      const last=this.queue.at(-1),previous=coalesce&&last?.coalesce===coalesce?last:null;
+-      if(this.queuedBytes-(previous?.bytes||0)+bytes>MAX_QUEUED_BYTES||
+-          (previous?previous.completions.length>=128:this.queue.length>=128)){
+-        const error=Error("Input queue is full; wait for the backend.");this.status(error.message);reject(error);return;
+-      }
+-      if(previous){
+-        this.queuedBytes+=bytes-previous.bytes;previous.bytes=bytes;previous.operation=operation;
+-        previous.completions.push({resolve,reject});this.pump();return;
+-      }
+-      this.queuedBytes+=bytes;
+-      this.queue.push({operation,coalesce,bytes,completions:[{resolve,reject}]});this.pump();
+-    });
+-  }
+-  async pump() {
+-    if (this.closed || this.running || this.failed || !this.state) return;
+-    this.running = true;
+-    try {
+-      while (this.inflight || this.queue.length) {
+-        if (!this.inflight) {
+-          const task=this.queue[0];
+-          try {
+-            const operation=typeof task.operation==="function"?JSON.parse(serializedOperation(task.operation(this.state.snapshot))):task.operation;
+-            const envelope={epoch:this.epoch,seq:String(this.ack+1n),operation};
+-            const text=JSON.stringify(envelope);
+-            if(text.length>MAX_OPERATION_BYTES||encoder.encode(text).length>MAX_OPERATION_BYTES)throw Error("Input envelope exceeds the byte limit.");
+-            this.inflight={task,envelope};this.queue.shift();
+-          }catch(error){
+-            // Local preparation failure has no uncertain backend side effect.
+-            // Reject while the task is still owned; never strand its completions.
+-            this.queue.shift();this.queuedBytes-=task.bytes;
+-            for(const completion of task.completions)completion.reject(error);
+-            this.status(error.message);continue;
+-          }
+-        }
+-        const {task, envelope} = this.inflight;
+-        const state = await this.exchange(envelope);
+-        if (this.closed) return;
+-        if (state.epoch !== this.epoch || BigInt(state.ack) < BigInt(envelope.seq)) throw Error(state.error || "Operation was not acknowledged.");
+-        this.accept(state); this.inflight = null;this.queuedBytes-=task.bytes;
+-        for (const completion of task.completions) completion.resolve(state);
+-      }
+-    } catch (error) {
+-      if(this.closed)return;
+-      this.failed = true; this.status(`Connection paused: ${error.message}. Retry preserves operation identity.`, true);
+-    } finally { this.running = false; }
+-  }
+-  close() {
+-    if(this.closed)return;this.closed=true;
+-    const tasks=[...this.queue];if(this.inflight)tasks.push(this.inflight.task);
+-    this.queue=[];this.inflight=null;this.queuedBytes=0;
+-    for(const task of tasks)for(const completion of task.completions)completion.reject(Error("Session closed"));
+-  }
+-  retry() { if(this.closed)return;this.failed = false; this.status(""); this.pump(); }
+-}
+-
+ export class Renderer {
+-  constructor(root, pages, send, document = globalThis.document) {
+-    this.root = root; this.pages = pages; this.send = send; this.document = document;
++  constructor(root, pages, send, document = globalThis.document, options = {}) {
++    this.root = root; this.pages = pages; this.send = send; this.document = document; this.sendEdit = options.sendEdit; this.listeners = [];
+     this.nodes = new Map(); this.pendingEdits = new Map(); this.editVersion = 0;
+     this.measurements = new Set(); this.measureRequests = new Map(); this.measureAttempts = new Set(); this.measureTimer = null; this.measureProbe = null;
+     this.destroyed = false; this.lastFocus = null; this.snapshot = null; this.pointerSerial = 0n;
+     this.activePointers = new Set();this.pointerCancelEpoch=0n;
+-    for(const kind of ["blur","pagehide"])this.document.defaultView?.addEventListener(kind,()=>this.cancelPointers());
+-    this.root.addEventListener("wheel", event => this.groupWheel(event), {passive: false});
+-    this.document.addEventListener("keydown", event => {
++    for(const kind of ["blur","pagehide"])this.listen(this.document.defaultView,kind,()=>this.cancelPointers());
++    this.listen(this.root,"wheel", event => this.groupWheel(event), {passive: false});
++    this.listen(this.document,"keydown", event => {
+       if (event.defaultPrevented || event.isComposing || !this.snapshot) return;
+       if(event.key==="Escape"&&this.snapshot.popup){event.preventDefault();this.operation({key:this.snapshot.popup.key},"popupClose");return;}
+       const code = ["Escape","Enter","F1","F2","F3","F4","F5","F6","F7","F8","F9","F10","F11","F12"].indexOf(event.key);
+@@ -125,6 +32,7 @@
+       }
+     });
+   }
++  listen(target,kind,callback,options) { target?.addEventListener(kind,callback,options); if(target)this.listeners.push([target,kind,callback,options]); }
+   cancelPointers() { ++this.pointerCancelEpoch;for(const cancel of [...this.activePointers])cancel(); }
+   element(tag, className, parent) {
+     const element = this.document.createElement(tag);
+@@ -293,11 +201,11 @@
+       entry.control.value=entry.widget.text;
+       // Use the Client's ordinary rejection/status path without retaining a
+       // closure over oversized provisional text or disturbing earlier edits.
+-      this.send({type:"edit",key,value,base:""},`edit:${id}`).catch(()=>{});return;
++      (this.sendEdit ? this.sendEdit(key,value) : this.send({type:"edit",key,value,base:""},`edit:${id}`)).catch(()=>{});return;
+     }
+     this.pendingEdits.set(id, version);
+-    this.send(snapshot => ({type: "edit", key, value,
+-      base: snapshot.widgets.find(widget => identity(widget.key) === id)?.text ?? ""}), `edit:${id}`)
++    (this.sendEdit ? this.sendEdit(key,value) : this.send(snapshot => ({type: "edit", key, value,
++      base: snapshot.widgets.find(widget => identity(widget.key) === id)?.text ?? ""}), `edit:${id}`))
+       .then(() => {
+         if (this.pendingEdits.get(id) !== version) return;
+         this.pendingEdits.delete(id);
+@@ -526,6 +434,8 @@
+     if (this.destroyed) return;
+     this.destroyed = true; this.stopMeasuring(); this.measureRequests.clear(); this.measureAttempts.clear(); this.measurements.clear();
+     this.cancelPointers();
++    for(const [target,kind,callback,options] of this.listeners)target.removeEventListener?.(kind,callback,options);this.listeners=[];
++    this.nodes.clear();this.pendingEdits.clear();
+   }
+   groupWheel(event) {
+     if(event.defaultPrevented||!this.snapshot)return;
+@@ -539,46 +449,3 @@
+   }
+ }
+ 
+-export async function executeService(service, host = globalThis) {
+-  const base={type:"service",id:service.id,value:"",error:""};
+-  if(service.kind===5||service.kind===6)return executeFileService(service,host);
+-  if(service.kind!==2)return {...base,status:"error",error:"This browser profile supports prompts only; file paths and external host services are unsupported."};
+-  const document=host.document;
+-  if(!document)return {...base,status:"error",error:"This host has no DOM dialog support."};
+-  return new Promise(resolve=>{
+-    const previous=document.activeElement,dialog=document.createElement("dialog");dialog.className="service-prompt";
+-    const form=document.createElement("form"),label=document.createElement("label"),title=document.createElement("span"),input=document.createElement("input");
+-    const error=document.createElement("p"),actions=document.createElement("div"),cancel=document.createElement("button"),accept=document.createElement("button");
+-    title.textContent=service.title;input.type="text";input.value=service.value;input.setAttribute("aria-label",service.title);
+-    error.setAttribute("role","status");actions.className="service-actions";cancel.type="button";cancel.textContent="Cancel";accept.type="submit";accept.textContent="OK";
+-    label.append(title,input);actions.append(cancel,accept);form.append(label,error,actions);dialog.append(form);
+-    let settled=false;
+-    const finish=(status,value="",failure="")=>{
+-      if(settled)return;settled=true;
+-      host.signal?.removeEventListener("abort",abort);
+-      if(dialog.open)dialog.close();dialog.remove();
+-      if(previous?.isConnected)previous.focus({preventScroll:true});
+-      resolve({...base,status,value,error:failure});
+-    };
+-    const abort=()=>finish("cancelled");
+-    host.signal?.addEventListener("abort",abort,{once:true});
+-    if(host.signal?.aborted){abort();return;}
+-    const submit=()=>{
+-      const value=input.value;
+-      if(BigInt(encoder.encode(value).length)>BigInt(service.byteLimit)){error.textContent=`Text exceeds the ${service.byteLimit}-byte limit.`;input.focus();return;}
+-      finish("success",value);
+-    };
+-    form.addEventListener("submit",event=>{event.preventDefault();submit();});
+-    cancel.addEventListener("click",()=>finish("cancelled"));
+-    dialog.addEventListener("cancel",event=>{event.preventDefault();finish("cancelled");});
+-    dialog.addEventListener("close",()=>finish("cancelled"));
+-    dialog.addEventListener("keydown",event=>{
+-      event.stopPropagation();
+-      if(event.key==="Escape"){event.preventDefault();finish("cancelled");}
+-      else if(event.key==="Enter"&&event.target===input&&!event.isComposing){event.preventDefault();submit();}
+-    });
+-    try{
+-      (document.querySelector?.('#stage')||document.body).append(dialog);dialog.showModal();input.focus();input.select();
+-    }catch(failure){finish("error","",failure.message||"Could not open prompt");}
+-  });
+-}

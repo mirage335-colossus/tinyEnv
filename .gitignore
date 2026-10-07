@@ -1,0 +1,10 @@
+/build/
+/dist/
+/.agent-work/
+/CMakeUserPresets.json
+__pycache__/
+*.pyc
+/.cache/
+/third_party/cache/
+.DS_Store
+/:memory:.ses

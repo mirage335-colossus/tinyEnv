@@ -1,0 +1,29 @@
+@PACKAGE_INIT@
+set(Foundation_CORE_PROVIDER "@FOUNDATION_CORE_PROVIDER@")
+if(Foundation_CORE_PROVIDER STREQUAL "rust" AND NOT TARGET foundation::rust_component)
+  set_and_check(_foundation_rust_archive "@PACKAGE_CMAKE_INSTALL_LIBDIR@/@FOUNDATION_RUST_ARCHIVE_NAME@")
+  add_library(foundation::rust_component STATIC IMPORTED)
+  set_target_properties(foundation::rust_component PROPERTIES
+    IMPORTED_LOCATION "${_foundation_rust_archive}"
+    INTERFACE_LINK_LIBRARIES "@FOUNDATION_RUST_NATIVE_LIBRARIES@"
+    INTERFACE_LINK_OPTIONS "@FOUNDATION_RUST_LINK_OPTIONS@")
+  unset(_foundation_rust_archive)
+endif()
+include("${CMAKE_CURRENT_LIST_DIR}/FoundationTargets.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/StaticCxxRuntime.cmake")
+set(Foundation_PORTABLE "@FOUNDATION_PORTABLE@")
+set(Foundation_MSVC_RUNTIME_LIBRARY "@CMAKE_MSVC_RUNTIME_LIBRARY@")
+# The imported archive cannot change its consumer's runtime automatically.
+# Apply the recorded ABI choice explicitly to each executable/library consumer.
+function(foundation_apply_runtime target)
+  if(EMSCRIPTEN)
+    target_compile_options(${target} PRIVATE -fexceptions)
+    target_link_options(${target} PRIVATE -fexceptions -sASSERTIONS=1)
+  elseif(MSVC AND Foundation_MSVC_RUNTIME_LIBRARY)
+    set_property(TARGET ${target} PROPERTY MSVC_RUNTIME_LIBRARY "${Foundation_MSVC_RUNTIME_LIBRARY}")
+  elseif(Foundation_PORTABLE)
+    foundation_require_static_gnu_runtime()
+    foundation_link_static_gnu_runtime(${target} PRIVATE)
+  endif()
+endfunction()
+check_required_components(Foundation)

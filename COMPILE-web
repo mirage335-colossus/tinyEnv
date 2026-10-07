@@ -1,0 +1,41 @@
+Software Foundation — build and open the browser GUI
+
+Run from the repository root. Requires Git, CMake >=3.24, Ninja, a C++20
+compiler, Python >=3.9, and a current browser. No native GUI toolkit or
+prepared C++ SDK is needed for the hosted-browser example. Rust is the default;
+Debian-family dev requires installed distribution rustc/Cargo, while another
+native host needs --rust-sdk /absolute/matched-rust-sdk.
+
+Build and start the hosted application:
+./build.sh build dev --gui --gui-backends hosted-web --build-dir build/demo-web
+python3 -B build/demo-web/gui/web/serve.py --executable build/demo-web/gui/foundation-gui-web
+
+Open the loopback URL printed by the server in your browser. Keep its terminal
+running. The page shows "Entry list": type text, select "Add entry", then try
+"Count text". Each tab owns a separate in-memory collection. Use Actions ->
+Export entries and the browser's Download button to save entries.
+Press Ctrl+C in the server terminal to stop the server and its sessions.
+The server uses an already-built executable; rerun the build command after
+source changes, then restart the server and reload the page.
+
+The GUI sources are retained in this checkout; normal builds download nothing.
+Keep build/demo-web separate from native-toolkit and Wasm trees. A changed
+toolchain or backend selection needs a fresh build directory.
+On Windows, initialize a developer prompt, use python tools/build.py instead
+of ./build.sh and python instead of python3, append .exe to the executable, and
+add --rust-sdk C:\retained\rust-windows-sdk to the build command.
+
+Optional self-contained Wasm application (Linux x86_64 host):
+This route needs the separate matched browser and Rust SDK extensions; the Windows substitution
+above applies to the hosted-native recipe, not this SDK.
+Replace both paths with verified Emscripten 6.0.10/Rust 1.63 inputs in docs/sdk.md.
+./build.sh build release --gui --gui-backends wasm --sdk /absolute/prepared-wasm-sdk --rust-sdk /absolute/prepared-wasm-rust-sdk --build-dir build/demo-wasm
+
+Open build/demo-wasm/gui/wasm-package/software-foundation-wasm.html in a browser.
+That single file contains the application and runs without a server or network.
+Preparing the SDK is a separate operation; the command never downloads one.
+
+Native window: COMPILE-gui. Screenshots: docs/screenshots.md and SCREENSHOTS.
+Transport, session and platform details: docs/gui-boundary.md#build-and-run.
+Offline Wasm package: docs/gui-boundary.md#worker-execution-and-an-offline-browser-application.
+Build reference: docs/building.md. Focused checks: docs/testing.md.

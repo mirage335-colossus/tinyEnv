@@ -1,0 +1,11 @@
+--- a/signal.c
++++ b/signal.c
+@@ -18,7 +18,7 @@
+ }
+ 
+ float simple_c_apply_gain(float sample, float gain) {
+-    return sample * gain;
++    return sample * gain + 1.0f;
+ }
+ 
+ int simple_c_collect_sample(struct simple_c_state *state, float sample) {

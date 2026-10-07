@@ -1,0 +1,363 @@
+{
+  "title": "AI-authored GUI mental model: start here",
+  "authorship": "AI-authored conceptual explanation",
+  "authored_at": "2026-10-04",
+  "intro": "Read these small diagrams first, then follow their links to the source-backed code diagrams. The shared Application owns feature meaning, visible state and layout. The host chooses a concrete GUI adapter. Store owns record rules and data. This is a deliberately simple explanation authored by an AI; the local documentation generator reads this static file and needs no AI.",
+  "limits": [
+    "These are conceptual paths, not complete execution traces; guards, retries and some helper steps are omitted.",
+    "FLTK illustrates native startup. Other hosts reuse the shared application through the same contract and required capabilities.",
+    "This explanation may lag the code. Regenerate documentation only when explicitly wanted."
+  ],
+  "diagrams": [
+    {
+      "id": "main-to-widget",
+      "title": "From main to a widget",
+      "question": "How does the executable reach the code that creates a widget?",
+      "summary": "Follow the downward call path. The declaration table feeds the loop from the side as data. Application::add creates one shared Snapshot widget per eligible declaration.",
+      "notes": [
+        "NativeSession is an alias for Session with native file services.",
+        "Session registers the adapter callback, constructs Application, then enables dispatch through current_.",
+        "The constructor skips the optional Remove declaration; its flag is true."
+      ],
+      "nodes": [
+        {
+          "id": "main",
+          "title": "main",
+          "subtitle": "Executable entry",
+          "column": 1,
+          "row": 0,
+          "kind": "call",
+          "detail": {"map": "gui-startup", "node": "entry"},
+          "source": {"path": "gui/hosts/fltk_main.cpp", "needle": "int main(int argc, char** argv) { return foundation::host::run_fltk<foundation::ui::Application>(argc, argv); }"}
+        },
+        {
+          "id": "runner",
+          "title": "run_fltk<Application>",
+          "subtitle": "Host constructs NativeSession",
+          "column": 1,
+          "row": 1,
+          "kind": "call",
+          "detail": {"map": "gui-startup", "node": "session"},
+          "source": {"path": "gui/hosts/fltk_main.cpp", "needle": "NativeSession<App, gui::fltk::Adapter> session;"}
+        },
+        {
+          "id": "session",
+          "title": "Session constructs Application",
+          "subtitle": "Adapter is constructed first",
+          "column": 1,
+          "row": 2,
+          "kind": "call",
+          "detail": {"map": "application-ownership", "node": "construct"},
+          "source": {"path": "gui/host/contract.hpp", "needle": "}), application(adapter) { current_ = &application; }"}
+        },
+        {
+          "id": "application",
+          "title": "Application constructor",
+          "subtitle": "Create shared UI state",
+          "column": 1,
+          "row": 3,
+          "kind": "application",
+          "detail": {"map": "application-init", "node": "enter"},
+          "source": {"path": "gui/shared/application.cpp", "needle": "Application::Application(gui::Adapter& adapter, std::unique_ptr<TaskExecutor> executor)"}
+        },
+        {
+          "id": "definitions",
+          "title": "view_definition.hpp",
+          "subtitle": "Actual widget definition rows",
+          "column": 0,
+          "row": 4,
+          "kind": "data",
+          "detail": {"map": "widget-definitions", "node": "controls"},
+          "source": {"path": "gui/shared/view_definition.hpp", "needle": "inline constexpr std::array view_definition{"}
+        },
+        {
+          "id": "loop",
+          "title": "for each row",
+          "subtitle": "in view_definition",
+          "column": 1,
+          "row": 4,
+          "kind": "call",
+          "detail": {"map": "widget-definitions", "node": "loop"},
+          "source": {"path": "gui/shared/application.cpp", "needle": "for (const auto& definition : view_definition)\n        if (!definition.remove_extension) add(definition);"}
+        },
+        {
+          "id": "add",
+          "title": "add(definition)",
+          "subtitle": "Create and populate shared widget",
+          "column": 1,
+          "row": 5,
+          "kind": "application",
+          "detail": {"map": "widget-create", "node": "identity"},
+          "source": {"path": "gui/shared/application.cpp", "needle": "gui::Widget& Application::add(const ViewDefinition& definition) {"}
+        }
+      ],
+      "edges": [
+        {"from": "main", "to": "runner", "label": "call", "kind": "call"},
+        {"from": "runner", "to": "session", "label": "construct", "kind": "call"},
+        {"from": "session", "to": "application", "label": "application(adapter)", "kind": "call"},
+        {"from": "application", "to": "loop", "label": "constructor body", "kind": "step"},
+        {"from": "definitions", "to": "loop", "label": "supplies data", "kind": "data"},
+        {"from": "loop", "to": "add", "label": "add(definition)", "kind": "call"}
+      ]
+    },
+    {
+      "id": "gui-boundary",
+      "title": "The shared GUI boundary",
+      "question": "What stays shared when the GUI backend changes?",
+      "summary": "Application sends Snapshot data outward and receives Event input inward through a common Adapter contract. Feature decisions and Store calls remain shared. The host selects the concrete backend that implements the contract.",
+      "notes": [
+        "Snapshot and Event are shared data contracts; they render no pixels themselves.",
+        "Application/handle show one application; Adapter/FLTK show one adapter through its interface and implementation.",
+        "Shared controls and handlers stay in Application; supported capabilities are still part of the backend contract."
+      ],
+      "nodes": [
+        {
+          "id": "application",
+          "title": "Application",
+          "subtitle": "Features, state and layout",
+          "column": 0,
+          "row": 0,
+          "kind": "application",
+          "detail": {"map": "application-ownership", "node": "view"},
+          "source": {"path": "gui/shared/application.hpp", "needle": "// Only the composition root knows which concrete adapter is supplied."}
+        },
+        {
+          "id": "snapshot",
+          "title": "gui::Snapshot",
+          "subtitle": "View data goes outward",
+          "column": 1,
+          "row": 0,
+          "kind": "boundary",
+          "detail": {"map": "publish-view", "node": "stage"},
+          "source": {"path": "@gui-boundary/include/gui/contract.hpp", "needle": "struct Snapshot {"}
+        },
+        {
+          "id": "adapter",
+          "title": "gui::Adapter",
+          "subtitle": "Common presentation interface",
+          "column": 2,
+          "row": 0,
+          "kind": "boundary",
+          "detail": {"map": "publish-view", "node": "present"},
+          "source": {"path": "@gui-boundary/include/gui/contract.hpp", "needle": "virtual void present(Snapshot snapshot)=0;"}
+        },
+        {
+          "id": "backend",
+          "title": "gui::fltk::Adapter",
+          "subtitle": "Paint and translate input",
+          "column": 2,
+          "row": 1,
+          "kind": "backend",
+          "detail": {"map": "gui-startup", "node": "session"}
+        },
+        {
+          "id": "event",
+          "title": "gui::Event",
+          "subtitle": "Input goes inward",
+          "column": 1,
+          "row": 1,
+          "kind": "boundary",
+          "detail": {"map": "event-dispatch", "node": "bridge"},
+          "source": {"path": "@gui-boundary/include/gui/contract.hpp", "needle": "using Event=std::variant<WidgetEvent,PageEvent,ResizeEvent,CloseEvent,ShortcutEvent>;"}
+        },
+        {
+          "id": "handler",
+          "title": "Application::handle",
+          "subtitle": "Shared input meaning",
+          "column": 0,
+          "row": 1,
+          "kind": "application",
+          "detail": {"map": "event-dispatch", "node": "activation"},
+          "source": {"path": "gui/shared/application.cpp", "needle": "void Application::handle(gui::Event event) {"}
+        },
+        {
+          "id": "store",
+          "title": "foundation::Store",
+          "subtitle": "Record rules and owned data",
+          "column": 0,
+          "row": 2,
+          "kind": "core",
+          "detail": {"map": "application-ownership", "node": "store"},
+          "source": {"path": "gui/shared/application.hpp", "needle": "foundation::Store entries_{entry_limit_};"}
+        }
+      ],
+      "edges": [
+        {"from": "application", "to": "snapshot", "label": "publish view", "kind": "data"},
+        {"from": "snapshot", "to": "adapter", "label": "present(snapshot)", "kind": "data"},
+        {"from": "adapter", "to": "backend", "label": "implementation", "kind": "step"},
+        {"from": "backend", "to": "event", "label": "input", "kind": "event"},
+        {"from": "event", "to": "handler", "label": "host callback", "kind": "event"},
+        {"from": "handler", "to": "store", "label": "record actions", "kind": "call"}
+      ]
+    },
+    {
+      "id": "model-to-pixels",
+      "title": "Shared widget data becomes a presented view",
+      "question": "When does creating a widget become something visible?",
+      "summary": "Application::add fills the owned view model. Application::publish stages the next Snapshot, computes shared layout and asks the adapter to present it. The concrete backend performs toolkit painting.",
+      "notes": [
+        "add creates shared widget data. It does not create a native toolkit control.",
+        "The constructor and event handlers decide when to call publish.",
+        "publish assigns the staged Snapshot to view_ after present returns successfully."
+      ],
+      "nodes": [
+        {
+          "id": "add",
+          "title": "Application::add",
+          "subtitle": "Create shared widget data",
+          "column": 0,
+          "row": 0,
+          "kind": "application",
+          "detail": {"map": "widget-create", "node": "append"},
+          "source": {"path": "gui/shared/application.cpp", "needle": "view_.widgets.push_back(std::move(widget));"}
+        },
+        {
+          "id": "view",
+          "title": "view_",
+          "subtitle": "Owned gui::Snapshot",
+          "column": 1,
+          "row": 0,
+          "kind": "data",
+          "detail": {"map": "application-ownership", "node": "view"},
+          "source": {"path": "gui/shared/application.hpp", "needle": "gui::Snapshot view_;"}
+        },
+        {
+          "id": "publish",
+          "title": "Application::publish",
+          "subtitle": "Stage the next Snapshot",
+          "column": 2,
+          "row": 0,
+          "kind": "application",
+          "detail": {"map": "publish-view", "node": "stage"},
+          "source": {"path": "gui/shared/application.cpp", "needle": "void Application::publish() {"}
+        },
+        {
+          "id": "layout",
+          "title": "gui::compose_layout",
+          "subtitle": "Compute shared geometry",
+          "column": 2,
+          "row": 1,
+          "kind": "call",
+          "detail": {"map": "publish-layout", "node": "compose"},
+          "source": {"path": "gui/shared/application.cpp", "needle": "const auto boxes = gui::compose_layout(panel, {16, 16, width, height},"}
+        },
+        {
+          "id": "present",
+          "title": "adapter_.present",
+          "subtitle": "Hand over the staged Snapshot",
+          "column": 1,
+          "row": 1,
+          "kind": "boundary",
+          "detail": {"map": "publish-view", "node": "present"},
+          "source": {"path": "gui/shared/application.cpp", "needle": "adapter_.present(next);"}
+        },
+        {
+          "id": "backend",
+          "title": "gui::fltk::Adapter",
+          "subtitle": "Present with the selected toolkit",
+          "column": 0,
+          "row": 1,
+          "kind": "backend",
+          "detail": {"map": "gui-startup", "node": "session"}
+        }
+      ],
+      "edges": [
+        {"from": "add", "to": "view", "label": "append widget", "kind": "data"},
+        {"from": "view", "to": "publish", "label": "copy into next", "kind": "data"},
+        {"from": "publish", "to": "layout", "label": "compose", "kind": "call"},
+        {"from": "layout", "to": "present", "label": "back in publish", "kind": "return"},
+        {"from": "present", "to": "backend", "label": "concrete implementation", "kind": "call"}
+      ]
+    },
+    {
+      "id": "add-click",
+      "title": "An Add click reaches core, then refreshes the view",
+      "question": "Which shared functions run when the Add button is clicked?",
+      "summary": "The backend reports an activation for entries.add. The shared handler routes it to append_entry, which calls Store::add. Control returns through the helper to the handler, and the handler publishes the resulting state.",
+      "notes": [
+        "handle checks and normalizes current input before routing the target ID.",
+        "Store returns to append_entry; the helper returns to handle before publication.",
+        "Expected input/capacity rejection is caught by the helper and published as shared status."
+      ],
+      "nodes": [
+        {
+          "id": "button",
+          "title": "entries.add",
+          "subtitle": "The shared Add button",
+          "column": 0,
+          "row": 0,
+          "kind": "data",
+          "detail": {"map": "widget-definitions", "node": "controls"},
+          "source": {"path": "gui/shared/view_definition.hpp", "needle": "ViewDefinition{\"entries.add\", gui::Kind::button, 32, \"\", \"Add entry\", \"\"},"}
+        },
+        {
+          "id": "activation",
+          "title": "gui::Activate",
+          "subtitle": "WidgetEvent targets entries.add",
+          "column": 1,
+          "row": 0,
+          "kind": "boundary",
+          "detail": {"map": "event-dispatch", "node": "activation"}
+        },
+        {
+          "id": "handle",
+          "title": "Application::handle",
+          "subtitle": "Route the Add target",
+          "column": 2,
+          "row": 0,
+          "kind": "application",
+          "detail": {"map": "event-dispatch", "node": "activation"},
+          "source": {"path": "gui/shared/application.cpp", "needle": "if (widget->target.id == \"entries.add\") append_entry();"}
+        },
+        {
+          "id": "append",
+          "title": "append_entry",
+          "subtitle": "Read editor and update shared status",
+          "column": 2,
+          "row": 1,
+          "kind": "application",
+          "detail": {"map": "append-entry", "node": "core"},
+          "source": {"path": "gui/shared/application.cpp", "needle": "void Application::append_entry() {"}
+        },
+        {
+          "id": "store",
+          "title": "Store::add",
+          "subtitle": "Validate and insert an owned record",
+          "column": 1,
+          "row": 1,
+          "kind": "core",
+          "detail": {"map": "core-add", "node": "validate"},
+          "source": {"path": "src/store.cpp", "needle": "RecordId Store::add(std::string_view text) {"}
+        },
+        {
+          "id": "resume",
+          "title": "Application::handle",
+          "subtitle": "Resume after the helper returns",
+          "column": 0,
+          "row": 1,
+          "kind": "application",
+          "detail": {"map": "event-dispatch", "node": "publish"},
+          "source": {"path": "gui/shared/application.cpp", "needle": "        }, widget->input);\n    }\n    publish();"}
+        },
+        {
+          "id": "publish",
+          "title": "Application::publish",
+          "subtitle": "Refresh rows, layout and status",
+          "column": 0,
+          "row": 2,
+          "kind": "application",
+          "detail": {"map": "publish-view", "node": "stage"},
+          "source": {"path": "gui/shared/application.cpp", "needle": "void Application::publish() {"}
+        }
+      ],
+      "edges": [
+        {"from": "button", "to": "activation", "label": "backend input", "kind": "event"},
+        {"from": "activation", "to": "handle", "label": "host callback", "kind": "event"},
+        {"from": "handle", "to": "append", "label": "append_entry()", "kind": "call"},
+        {"from": "append", "to": "store", "label": "entries_.add(text)", "kind": "call"},
+        {"from": "store", "to": "resume", "label": "via append_entry", "kind": "return"},
+        {"from": "resume", "to": "publish", "label": "publish()", "kind": "call"}
+      ]
+    }
+  ]
+}

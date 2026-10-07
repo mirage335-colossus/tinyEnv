@@ -1,0 +1,137 @@
+name: Explicit Rust hybrid qualification
+'on':
+  push:
+    branches: ['codex/rust-*']
+  workflow_dispatch:
+    inputs:
+      recipes:
+        description: Optional exact all-GUI C++ target-to-recipe map; empty uses maintained recipes
+        type: string
+        default: ''
+      graphics_archive_url:
+        description: Explicit retained Windows graphics archive; required for every Windows GUI check
+        type: string
+        default: ''
+      linux_pool:
+        description: Explicit qualified runner pool
+        type: choice
+        options: [standard, faster]
+        default: standard
+      jobs:
+        description: Compile concurrency
+        type: choice
+        options: [auto, '2', '4', '8']
+        default: auto
+permissions:
+  contents: read
+  actions: read
+env:
+  GH_TOKEN: ${{ github.token }}
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+  PROFILE: all-gui
+  JOBS: ${{ inputs.jobs || 'auto' }}
+  LINUX_POOL: ${{ inputs.linux_pool || 'standard' }}
+  GRAPHICS_ARCHIVE_URL: ${{ inputs.graphics_archive_url || vars.FOUNDATION_GRAPHICS_ARCHIVE_URL || format('https://api.github.com/repos/{0}/releases/assets/604977464', github.repository) }}
+  FOUNDATION_FASTER_LINUX_RUNNER: ${{ vars.FOUNDATION_FAST_LINUX_RUNNER }}
+  FOUNDATION_FASTER_ARM_RUNNER: ${{ vars.FOUNDATION_FAST_ARM_RUNNER }}
+  FOUNDATION_FASTER_WINDOWS_RUNNER: ${{ vars.FOUNDATION_FAST_WINDOWS_RUNNER }}
+concurrency:
+  group: rust-qualification-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - id: plan
+      run: python -B .github/scripts/rust_qualification.py plan
+      env:
+        RECIPES: ${{ inputs.recipes }}
+  platform:
+    name: Native and retained-source Rust qualification (${{ matrix.target }})
+    needs: plan
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    permissions:
+      contents: write
+      actions: read
+    env:
+      TARGET: ${{ matrix.target }}
+      RECIPE: ${{ matrix.recipe }}
+      FOUNDATION_OPTIONAL_PROVIDER_RECIPE: ${{ matrix.rust_recipe }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - if: runner.os == 'Windows'
+      name: Select the already installed native Microsoft compiler
+      shell: pwsh
+      run: ./tools/ci_windows.ps1
+    - name: Explicit compiler acquisition and retained input preparation
+      run: python -B .github/scripts/rust_qualification.py prepare
+    - if: runner.os == 'Linux'
+      name: Bookworm full source, GUI, real browsers, package and disconnected recovery
+      run: python -B .github/scripts/rust_qualification.py linux
+    - if: runner.os == 'Windows'
+      name: Native full source, every GUI backend, browser and package qualification
+      run: python -B .github/scripts/rust_qualification.py qualify
+    - if: runner.os == 'Windows'
+      name: Bounded native disconnected recovery, core, installed consumer and package
+      shell: pwsh
+      run: ./tools/rust_windows_offline.ps1
+    - if: always()
+      name: Retain the exact qualification inputs, packages and diagnostics
+      run: python -B .github/scripts/lifecycle.py bundle-store
+      env:
+        BUNDLE_NAME: rust-qualification-${{ matrix.target }}-${{ github.run_attempt }}
+        BUNDLE_PATHS: |-
+          build/rust-preparation.json
+          build/rust-qualification.json
+          build/rust-recovery-inputs.json
+          build/rust-candidate/release.json
+          build/rust-recovery/
+          build/produced/*.tar.gz
+          build/produced/*.zip
+          build/produced/*.json
+          build/produced/*.xml
+          build/produced/*.log
+          build/produced/work/build/Testing/Temporary/
+          build/produced/work/build/test-reports/
+          build/produced/work/build/gui/visual-evidence/
+          build/rust-browser-firefox/
+          build/rust-browser-chromium/
+          build/rust-replay/qualification.json
+          build/rust-package-backends.json
+          build/rust-package-rev/
+          build/rust-offline/acceptance.json
+          build/rust-offline/*/*.json
+          build/rust-offline/*/*.log
+          build/rust-windows-firewall.json
+          build/rust-windows-online.json
+          build/rust-windows-offline.log
+          build/rust-windows-offline/qualification.json
+          build/rust-windows-offline/core.junit.xml
+          build/rust-windows-debug/source.junit.xml
+          build/rust-windows-debug/qualification.json
+  verdict:
+    if: always()
+    needs: [plan, platform]
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Require every actual native and browser lane
+      shell: python
+      env:
+        PLAN_RESULT: ${{ needs.plan.result }}
+        PLATFORM_RESULT: ${{ needs.platform.result }}
+      run: |
+        import os
+        if any(os.environ[name] != 'success' for name in ('PLAN_RESULT', 'PLATFORM_RESULT')):
+            raise SystemExit('Rust qualification is incomplete or failed')

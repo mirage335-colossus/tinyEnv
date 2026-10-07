@@ -1,0 +1,61 @@
+name: Explicit legacy SDK storage import
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Exact original SDK target
+        type: choice
+        options: [linux-x86_64, linux-aarch64, windows-x86_64, browser-wasm32]
+        required: true
+      profile:
+        description: Exact original SDK capability profile
+        type: choice
+        options: [core, all-gui]
+        default: all-gui
+      retained_input:
+        description: Exact version-1 original producer, group and proof identities
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+env:
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+  GH_TOKEN: ${{ github.token }}
+jobs:
+  import:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      actions: read
+    env:
+      TARGET: ${{ inputs.target }}
+      SDK_PROFILE: ${{ inputs.profile }}
+      LEGACY_INPUT: ${{ inputs.retained_input }}
+    outputs:
+      retained_input: ${{ steps.request.outputs.retained_input }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Verify original producer, immutable ZIPs and complete inner SDK group
+      run: python .github/scripts/lifecycle.py sdk-import-legacy
+    - name: Retain exact verified SDK bytes in private draft storage
+      run: python .github/scripts/lifecycle.py bundle-store
+      env:
+        BUNDLE_NAME: sdk-group-${{ inputs.target }}-${{ github.run_attempt }}
+        BUNDLE_PATHS: build/sdk-group/
+    - name: Retain complete original proof and explicit unqualified import lineage
+      run: python .github/scripts/lifecycle.py bundle-store
+      env:
+        BUNDLE_NAME: sdk-proof-${{ inputs.target }}-${{ github.run_attempt }}
+        BUNDLE_PATHS: |
+          build/legacy-proof/
+          build/sdk-origin.json
+          build/sdk-retention.json
+          build/sdk-import.json
+    - name: Emit exact version-2 request for independent consumer qualification
+      id: request
+      run: python .github/scripts/lifecycle.py sdk-import-request

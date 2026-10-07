@@ -1,0 +1,152 @@
+name: Promote exact certified candidate
+'on':
+  workflow_dispatch:
+    inputs:
+      preserve_artifacts:
+        description: Keep temporary handoffs and diagnostics for one day after completion
+        type: boolean
+        default: false
+      tag:
+        description: Exact published candidate tag
+        type: string
+        required: true
+      inventory:
+        description: Exact release.json SHA-256
+        type: string
+        required: true
+      profile:
+        description: Support policy profile
+        type: choice
+        options:
+        - core
+        - all-gui
+        default: core
+      execute:
+        description: Set Latest only after remote certificate and asset revalidation
+        type: boolean
+        default: false
+      certification_run:
+        description: Exact certificate run ID
+        type: string
+        required: true
+      certification_attempt:
+        description: Exact certificate attempt
+        type: string
+        required: true
+      certificate:
+        description: Exact certificate JSON SHA-256
+        type: string
+        required: true
+  workflow_call:
+    inputs:
+      preserve_artifacts:
+        description: Keep temporary handoffs and diagnostics for one day after completion
+        type: boolean
+        default: false
+      tag:
+        description: Exact published candidate tag
+        type: string
+        required: true
+      inventory:
+        description: Exact release.json SHA-256
+        type: string
+        required: true
+      profile:
+        description: Support policy profile
+        type: string
+        default: core
+      execute:
+        description: Set Latest only after remote certificate and asset revalidation
+        type: boolean
+        default: false
+      certification_run:
+        description: Exact certificate run ID
+        type: string
+        required: true
+      certification_attempt:
+        description: Exact certificate attempt
+        type: string
+        required: true
+      certificate:
+        description: Exact certificate JSON SHA-256
+        type: string
+        required: true
+    outputs:
+      promoted:
+        description: Verified promoted
+        value: ${{ jobs.promote.outputs.promoted }}
+permissions:
+  contents: read
+  actions: read
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - shell: python
+      run: |-
+        import subprocess, sys
+        subprocess.run([sys.executable, '.github/scripts/lifecycle.py', 'promotion-plan'], check=True)
+    - name: Retain verified promotion-inputs-${{ github.run_attempt }}
+      uses: ./.github/actions/ci-evidence-publish
+      with:
+        name: promotion-inputs-${{ github.run_attempt }}
+        paths: |-
+          build/candidate/release.json
+          build/delivery.json
+          build/receipts/
+    permissions:
+      contents: write
+      actions: read
+  promote:
+    if: inputs.execute
+    needs: plan
+    runs-on: ubuntu-24.04
+    environment: release-publisher
+    concurrency:
+      group: foundation-release-lifecycle
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      actions: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Download successful promotion preparation
+      uses: ./.github/actions/ci-evidence-download
+      with:
+        pattern: promotion-inputs
+    - shell: python
+      run: |
+        import subprocess,sys
+        subprocess.run([sys.executable,'.github/scripts/lifecycle.py','bundle-fetch'],check=True)
+      env:
+        BUNDLE_NAME: promotion-inputs-${{ github.run_attempt }}
+        BUNDLE_OUTPUT: build
+    - shell: python
+      run: |-
+        import subprocess, sys
+        subprocess.run([sys.executable, '.github/scripts/lifecycle.py', 'promote'], check=True)
+      id: result
+    - if: always()
+      name: Retain verified promotion-delivery-${{ github.run_attempt }}
+      uses: ./.github/actions/ci-evidence-publish
+      with:
+        name: promotion-delivery-${{ github.run_attempt }}
+        paths: build/receipts/
+    outputs:
+      promoted: ${{ steps.result.outputs.promoted }}
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+  TAG: ${{ inputs.tag }}
+  INVENTORY: ${{ inputs.inventory }}
+  PROFILE: ${{ inputs.profile }}
+  CERTIFICATION_RUN: ${{ inputs.certification_run }}
+  CERTIFICATION_ATTEMPT: ${{ inputs.certification_attempt }}
+  CERTIFICATE: ${{ inputs.certificate }}

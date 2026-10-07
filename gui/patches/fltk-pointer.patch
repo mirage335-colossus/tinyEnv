@@ -1,0 +1,156 @@
+--- backends/fltk/adapter.hpp
++++ backends/fltk/adapter.hpp
+@@ -31,11 +31,15 @@
+         explicit Window(Adapter& owner) : Fl_Double_Window(640, 480), owner_(owner) {}
+         void resize(int x, int y, int w, int h) override {
+             Fl_Double_Window::resize(x,y,w,h);
+-            if(owner_.started_ && !owner_.closed())
++            if(owner_.started_ && !owner_.closed()) {
++                owner_.cancel_pointer();
+                 owner_.dispatch(ResizeEvent{{double(w),double(h)},1});
++            }
+         }
+         int handle(int event) override {
++            if(event==FL_HIDE||event==FL_UNFOCUS)owner_.cancel_pointer();
+             if(event==FL_KEYDOWN) {
++                if(Fl::event_key()==FL_Escape)owner_.cancel_pointer();
+                 if(Fl::event_key()==FL_Tab && !Fl::event_ctrl())return owner_.focus_next(Fl::event_shift()!=0)?1:0;
+                 std::optional<ShortcutKey> key;
+                 if(Fl::event_key()==FL_Escape)key=ShortcutKey::escape;
+@@ -53,18 +57,10 @@
+                     if(a.enabled&&a.visible&&gui::contains(a.clip,{double(Fl::event_x()),double(Fl::event_y())})&&owner_.open_popup(*it))return 1;
+                 }
+             }
+-            if(event==FL_PUSH||event==FL_DRAG||event==FL_MOUSEWHEEL||event==FL_MOVE) {
+-                const auto order=paint_order(owner_.snapshot());
+-                for(auto it=order.rbegin();it!=order.rend();++it) {
+-                    const auto a=owner_.resolved_availability(*it);const auto* w=find_widget(owner_.snapshot(),*it);
+-                    if(!a.enabled||!a.visible||!gui::contains(a.clip,{double(Fl::event_x()),double(Fl::event_y())}))continue;
+-                    if(w->spec.pointer_input) {
+-                        const auto kind=event==FL_PUSH?(Fl::event_clicks()?PointerKind::double_click:PointerKind::click):event==FL_MOUSEWHEEL?PointerKind::wheel:PointerKind::move;
+-                        owner_.dispatch(WidgetEvent{*it,PointerInput{kind,{double(Fl::event_x()),double(Fl::event_y())},double(Fl::event_dx()),-double(Fl::event_dy()),Fl::event_ctrl()!=0,Fl::event_shift()!=0,Fl::event_alt()!=0}});
+-                        return 1;
+-                    }
+-                    break;
+-                }
++            if(event==FL_PUSH||event==FL_DRAG||event==FL_RELEASE||event==FL_MOUSEWHEEL||event==FL_MOVE) {
++                bool handled=false;
++                owner_.safely([&]{handled=owner_.pointer_event(event);});
++                if(handled)return 1;
+             }
+             if(event==FL_MOUSEWHEEL) {
+                 bool handled=false;
+@@ -285,6 +281,8 @@
+     std::function<void(ServiceResult)> service_reply_;
+     std::optional<ServiceResult> completed_service_;
+     bool started_=false,refreshing_=false;
++    struct PointerCapture {WidgetKey key;Point origin,last;};
++    std::optional<PointerCapture> pointer_capture_;
+     unsigned callback_depth_=0;
+     struct PendingScroll {WidgetKey key;Point offset;};
+     std::map<std::string,PendingScroll,std::less<>> pending_scroll_;
+@@ -312,6 +310,63 @@
+         try {operation();}catch(const std::exception& e){error_=e.what();}
+     }
+     void dispatch(Event event) {safely([&]{policy().send(std::move(event));});}
++    void cancel_pointer() {
++        if(!pointer_capture_)return;
++        const auto capture=*pointer_capture_;pointer_capture_.reset();
++        dispatch(WidgetEvent{capture.key,PointerInput{PointerKind::cancel,capture.last,0,0,false,false,false,1}});
++        if(!closed())policy().cancel_pointer();
++    }
++    std::optional<WidgetKey> pointer_target(Point position) const {
++        const auto order=paint_order(snapshot());
++        for(auto it=order.rbegin();it!=order.rend();++it) {
++            const auto area=resolved_availability(*it);const auto* widget=find_widget(snapshot(),*it);
++            if(area.enabled&&area.visible&&contains(area.clip,position)&&
++               (widget->spec.pointer_input||focusable(*widget)))return *it;
++        }
++        return std::nullopt;
++    }
++    bool pointer_event(int event) {
++        const Point position{double(Fl::event_x()),double(Fl::event_y())};
++        const bool control=Fl::event_ctrl()!=0,shift=Fl::event_shift()!=0,alt=Fl::event_alt()!=0;
++        const auto clicks=unsigned(std::max(0,Fl::event_clicks())+1);
++        if(event==FL_DRAG||event==FL_RELEASE) {
++            if(!pointer_capture_)return false;
++            if(event==FL_RELEASE&&Fl::event_button()!=FL_LEFT_MOUSE)return true;
++            const auto capture=*pointer_capture_;
++            const auto* widget=find_widget(snapshot(),capture.key);
++            const auto area=resolved_availability(capture.key);
++            if(!widget||!area.visible||!area.enabled||!contains(area.clip,capture.origin)||pointer_target(capture.origin)!=capture.key) {
++                cancel_pointer();return true;
++            }
++            pointer_capture_->last=position;
++            if(event==FL_RELEASE)pointer_capture_.reset();
++            policy().send(WidgetEvent{capture.key,PointerInput{event==FL_RELEASE?PointerKind::release:PointerKind::move,
++                position,0,0,control,shift,alt,1,clicks}});
++            return true;
++        }
++        if(pointer_capture_)return true;
++        const auto order=paint_order(snapshot());
++        for(auto it=order.rbegin();it!=order.rend();++it) {
++            const auto area=resolved_availability(*it);const auto* widget=find_widget(snapshot(),*it);
++            if(!area.enabled||!area.visible||!contains(area.clip,position))continue;
++            if(widget->spec.pointer_input) {
++                if(event==FL_PUSH&&Fl::event_button()==FL_LEFT_MOUSE) {
++                    focus(*it);
++                    pointer_capture_=PointerCapture{*it,position,position};
++                    policy().send(WidgetEvent{*it,PointerInput{PointerKind::press,position,0,0,control,shift,alt,1,clicks}});
++                } else {
++                    const auto kind=event==FL_PUSH?(Fl::event_clicks()?PointerKind::double_click:PointerKind::click):
++                        event==FL_MOUSEWHEEL?PointerKind::wheel:PointerKind::move;
++                    policy().send(WidgetEvent{*it,PointerInput{kind,position,double(Fl::event_dx()),-double(Fl::event_dy()),control,shift,alt}});
++                }
++                return true;
++            }
++            // Inert labels and groups allow an underlying declared surface to
++            // own gestures. Native buttons, editors and lists keep toolkit input.
++            if(focusable(*widget))break;
++        }
++        return false;
++    }
+     static void callback(Fl_Widget*,void* data) {
+         auto& entry=*static_cast<Entry*>(data);entry.owner->safely([&]{entry.owner->changed(entry);});
+     }
+@@ -461,7 +516,16 @@
+     }
+     ~Adapter() override {if(window_)window_->hide();}
+     void present(Snapshot view) override {
++        const bool revoke_pointer=snapshot().client_size!=view.client_size||snapshot().display_scale!=view.display_scale||
++            snapshot().active_page!=view.active_page||snapshot().modal_root!=view.modal_root;
+         RetainedAdapter::present(std::move(view));
++        if(pointer_capture_) {
++            const auto* widget=find_widget(snapshot(),pointer_capture_->key);
++            const auto area=resolved_availability(pointer_capture_->key);
++            if(revoke_pointer||!widget||!widget->spec.pointer_input||!area.visible||!area.enabled||!contains(area.clip,pointer_capture_->origin)||pointer_target(pointer_capture_->origin)!=pointer_capture_->key) {
++                pointer_capture_.reset();policy().cancel_pointer();
++            }
++        }
+         for(auto it=pending_scroll_.begin();it!=pending_scroll_.end();) {
+             if(!find_widget(snapshot(),it->second.key))it=pending_scroll_.erase(it);else ++it;
+         }
+@@ -624,6 +688,7 @@
+         pending_scroll_.insert_or_assign(key.id,PendingScroll{key,clamp_editor_scroll(*widget,offset)});
+     }
+     bool open_popup(const WidgetKey& key) override {
++        cancel_pointer();
+         if(service_)return false;
+         if(!RetainedAdapter::open_popup(key))return false;
+         const auto* widget=find_widget(snapshot(),key);if(!widget)return false;
+@@ -640,6 +705,7 @@
+     }
+     void close_popup(const WidgetKey& key) override {RetainedAdapter::close_popup(key);if(popup_)popup_->hide();}
+     void service(ServiceRequest request,std::function<void(ServiceResult)> reply) {
++        cancel_pointer();
+         policy().require_interaction();
+         if(service_)throw std::logic_error("A native service is already active");
+         if(!reply)throw std::invalid_argument("Missing service completion");
+@@ -662,6 +728,7 @@
+     }
+     bool service_active() const {(void)closed();return service_.has_value();}
+     void close() override {
++        pointer_capture_.reset();
+         RetainedAdapter::close();pending_scroll_.clear();service_reply_={};completed_service_.reset();service_.reset();
+         window_->hide();if(service_window_)service_window_->hide();if(popup_)popup_->hide();
+     }

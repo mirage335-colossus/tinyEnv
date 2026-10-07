@@ -1,0 +1,405 @@
+name: Certify exact published candidate
+'on':
+  workflow_dispatch:
+    inputs:
+      preserve_artifacts:
+        description: Keep temporary handoffs and diagnostics for one day after completion
+        type: boolean
+        default: false
+      tag:
+        description: Exact published candidate tag
+        type: string
+        required: true
+      inventory:
+        description: Exact release.json SHA-256
+        type: string
+        required: true
+      previous_packages:
+        description: Exact JSON upgrade selections for both Linux package targets
+        type: string
+        default: '{}'
+      profile:
+        description: Support policy profile
+        type: choice
+        options:
+        - core
+        - all-gui
+        default: core
+      graphics_archive_url:
+        description: Operator-retained HTTPS host graphics archive; required for Windows GUI checks
+        type: string
+        default: ''
+      linux_pool:
+        description: Authorized runner pool
+        type: choice
+        options: [standard, faster]
+        default: standard
+      execute:
+        description: Append this immutable certificate attempt to the candidate
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      preserve_artifacts:
+        description: Keep temporary handoffs and diagnostics for one day after completion
+        type: boolean
+        default: false
+      tag:
+        description: Exact published candidate tag
+        type: string
+        required: true
+      inventory:
+        description: Exact release.json SHA-256
+        type: string
+        required: true
+      previous_packages:
+        description: Exact JSON upgrade selections for both Linux package targets
+        type: string
+        default: '{}'
+      profile:
+        description: Support policy profile
+        type: string
+        default: core
+      graphics_archive_url:
+        description: Operator-retained HTTPS host graphics archive; required for Windows GUI checks
+        type: string
+        default: ''
+      linux_pool:
+        description: Authorized runner pool
+        type: string
+        default: standard
+      execute:
+        description: Append this immutable certificate attempt to the candidate
+        type: boolean
+        default: false
+    outputs:
+      certificate_sha256:
+        description: Verified certificate sha256
+        value: ${{ jobs.record.outputs.certificate_sha256 }}
+      certification_run:
+        description: Verified certification run
+        value: ${{ jobs.record.outputs.certification_run }}
+      certification_attempt:
+        description: Verified certification attempt
+        value: ${{ jobs.record.outputs.certification_attempt }}
+      inventory_sha256:
+        description: Verified inventory sha256
+        value: ${{ jobs.record.outputs.inventory_sha256 }}
+      eligible_for_promotion:
+        description: Verified eligible for promotion
+        value: ${{ jobs.record.outputs.eligible_for_promotion }}
+      attached:
+        description: Verified attached
+        value: ${{ jobs.attach.outputs.attached }}
+permissions:
+  contents: read
+  actions: read
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      control_attempt: ${{ steps.origin.outputs.attempt }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+      max_parallel: ${{ steps.plan.outputs.max_parallel }}
+      package_enabled: ${{ steps.packages.outputs.enabled }}
+      package_matrix: ${{ steps.slots.outputs.matrix }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Retain the original control attempt
+      id: origin
+      shell: python
+      run: |
+        import os
+        from pathlib import Path
+        with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as stream:
+            stream.write('attempt=' + os.environ['GITHUB_RUN_ATTEMPT'] + '\n')
+    - name: Freeze signed package controls and exact native upgrade predecessors
+      id: packages
+      run: python tools/release_package_check.py plan
+    - shell: python
+      run: |-
+        import subprocess, sys
+        subprocess.run([sys.executable, '.github/scripts/lifecycle.py', 'certification-plan'], check=True)
+      id: plan
+    - name: Allocate disjoint bounded native evidence slots
+      id: slots
+      shell: python
+      env:
+        CHECK_MATRIX: ${{ steps.plan.outputs.matrix }}
+        PACKAGE_ENABLED: ${{ steps.packages.outputs.enabled }}
+        PACKAGE_MATRIX: ${{ steps.packages.outputs.matrix }}
+      run: |
+        import json,os
+        from pathlib import Path
+        base=len(json.loads(os.environ['CHECK_MATRIX'])['include'])
+        matrix=json.loads(os.environ['PACKAGE_MATRIX'])
+        count=len(matrix['include'])
+        if os.environ['PACKAGE_ENABLED']=='true' and base+count>48:
+            raise SystemExit('Complete native and application evidence exceeds finite certification slots')
+        for index,row in enumerate(matrix['include']): row['slot']=base+index
+        with Path(os.environ['GITHUB_OUTPUT']).open('a',encoding='utf-8') as stream:
+            stream.write('matrix='+json.dumps(matrix)+'\n')
+    - name: Retain the frozen complete inventory and exact original asset identities
+      run: python .github/scripts/lifecycle.py qualification-metadata-check
+    - name: Retain bounded certification controls
+      uses: ./.github/actions/ci-evidence-publish
+      with:
+        name: qualification-inputs-${{ github.run_attempt }}
+        paths: |-
+          build/candidate/release.json
+          build/delivery.json
+          build/candidate-remote.json
+          build/check-plan.json
+          build/package-plan.json
+          build/package-control/current/
+          build/package-control/previous/
+    permissions:
+      contents: write
+      actions: read
+  check:
+    name: Qualify ${{ matrix.id }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(needs.prepare.outputs.max_parallel) }}
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    # Includes bounded shared GitHub quota waits as well as execution.
+    timeout-minutes: 240
+    env:
+      CONTROL_ATTEMPT: ${{ needs.prepare.outputs.control_attempt }}
+      BATCH: ${{ matrix.id }}
+      CHECK_IMAGE: ${{ matrix.image }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Download bounded workflow evidence
+      if: needs.prepare.outputs.control_attempt == github.run_attempt
+      uses: ./.github/actions/ci-evidence-download
+      with:
+        pattern: qualification-inputs
+    - name: Restore frozen metadata and only required original published assets
+      shell: python
+      env:
+        CHECK_PAYLOADS: ${{ toJSON(matrix.payloads) }}
+      run: |
+        import subprocess,sys
+        subprocess.run([sys.executable,'.github/scripts/lifecycle.py','fetch-published-check-inputs'],check=True)
+    - name: Verify the explicitly supplied retained Windows graphics input
+      if: runner.os == 'Windows' && matrix.graphics
+      run: python .github/scripts/lifecycle.py graphics-input
+    - if: runner.os == 'Windows'
+      shell: pwsh
+      run: ./tools/ci_windows.ps1
+    - name: Run each frozen execution in the transport batch
+      shell: python
+      run: |-
+        import subprocess, sys
+        subprocess.run([sys.executable, '.github/scripts/lifecycle.py', 'check-batch'], check=True)
+    - if: always()
+      name: Retain verified evidence-${{ matrix.id }}-${{ github.run_attempt }}
+      uses: ./.github/actions/ci-evidence-publish
+      with:
+        name: evidence-${{ matrix.id }}-${{ github.run_attempt }}
+        slot: ${{ strategy.job-index }}
+        paths: |-
+          build/evidence/
+          build/prerequisites/
+    permissions:
+      contents: write
+      actions: read
+  packages:
+    name: Qualify native package ${{ matrix.id }}
+    if: needs.prepare.outputs.package_enabled == 'true'
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.package_matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.kind == 'gentoo' && 180 || 90 }}
+    env:
+      CONTROL_ATTEMPT: ${{ needs.prepare.outputs.control_attempt }}
+      PACKAGE_CHECK: ${{ matrix.id }}
+    permissions:
+      contents: write
+      actions: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Download bounded workflow evidence
+      if: needs.prepare.outputs.control_attempt == github.run_attempt
+      uses: ./.github/actions/ci-evidence-download
+      with:
+        pattern: qualification-inputs
+    - name: Install the job-owned native display service
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends xvfb xauth x11-utils
+    - name: Install, upgrade and verify every signed backend payload
+      run: python tools/release_package_check.py check
+    - if: always()
+      name: Retain complete native package evidence
+      uses: ./.github/actions/ci-evidence-publish
+      with:
+        name: evidence-batch-package-${{ matrix.id }}-${{ github.run_attempt }}
+        slot: ${{ matrix.slot }}
+        allow-release-fallback: 'true'
+        paths: build/distro-evidence/
+  record:
+    env:
+      CONTROL_ATTEMPT: ${{ needs.prepare.outputs.control_attempt }}
+    if: always() && needs.prepare.result == 'success'
+    needs:
+    - prepare
+    - check
+    - packages
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Download bounded workflow evidence
+      uses: ./.github/actions/ci-evidence-download
+      with:
+        pattern: '{qualification-inputs,evidence-*}'
+    - name: Restore frozen controls and every batch outcome together
+      shell: python
+      env:
+        CHECK_BATCHES: ${{ needs.prepare.outputs.matrix }}
+      run: |
+        import subprocess,sys
+        subprocess.run([sys.executable,'.github/scripts/lifecycle.py','fetch-certification-evidence'],check=True)
+    - name: Collect every required native package result and its signed controls
+      env:
+        FOUNDATION_CI_ARTIFACT_RELEASE_FALLBACK: 'true'
+      run: python tools/release_package_check.py collect
+    - shell: python
+      run: |-
+        import subprocess, sys
+        subprocess.run([sys.executable, '.github/scripts/lifecycle.py', 'certificate'], check=True)
+      id: result
+    - if: always()
+      id: certificate_bundle
+      name: Retain verified certificate-${{ github.run_attempt }}
+      uses: ./.github/actions/ci-evidence-publish
+      with:
+        name: certificate-${{ github.run_attempt }}
+        allow-release-fallback: 'true'
+        paths: |-
+          build/candidate/release.json
+          build/delivery.json
+          build/candidate-remote.json
+          build/check-plan.json
+          build/package-plan.json
+          build/package-control/current/
+          build/package-control/previous/
+          build/package-evidence/
+          build/evidence/
+          build/certificate.json
+          build/attachment-plan.json
+          build/transport-receipts/
+    permissions:
+      contents: write
+      actions: read
+    outputs:
+      certificate_artifact_id: ${{ steps.certificate_bundle.outputs.artifact-id }}
+      certificate_sha256: ${{ steps.result.outputs.certificate_sha256 }}
+      certification_run: ${{ steps.result.outputs.certification_run }}
+      certification_attempt: ${{ steps.result.outputs.certification_attempt }}
+      inventory_sha256: ${{ steps.result.outputs.inventory_sha256 }}
+      eligible_for_promotion: ${{ steps.result.outputs.eligible_for_promotion }}
+  attach:
+    env:
+      CERTIFICATE_ATTEMPT: ${{ needs.record.outputs.certification_attempt }}
+      CERTIFICATE_SHA256: ${{ needs.record.outputs.certificate_sha256 }}
+    if: inputs.execute && always() && needs.record.result == 'success'
+    needs: record
+    runs-on: ubuntu-24.04
+    environment: release-publisher
+    concurrency:
+      group: foundation-release-lifecycle
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      actions: write
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Download bounded certificate evidence
+      if: needs.record.outputs.certification_attempt == github.run_attempt
+      uses: ./.github/actions/ci-evidence-download
+      with:
+        pattern: certificate
+        allow-release-fallback: 'true'
+    - shell: python
+      run: |
+        import subprocess,sys
+        subprocess.run([sys.executable,'.github/scripts/lifecycle.py','fetch-certificate'],check=True)
+    - shell: python
+      run: |-
+        import subprocess, sys
+        subprocess.run([sys.executable, '.github/scripts/lifecycle.py', 'attach-certificate'], check=True)
+      id: result
+    - if: always()
+      name: Retain verified certification-delivery-${{ github.run_attempt }}
+      uses: ./.github/actions/ci-evidence-publish
+      with:
+        name: certification-delivery-${{ github.run_attempt }}
+        paths: build/receipts/
+    - name: Remove the certificate handoff after verified public attachment
+      if: success() && !inputs.preserve_artifacts && steps.result.outputs.attached == 'true'
+      uses: ./.github/actions/ci-artifact-cleanup
+      continue-on-error: true
+      timeout-minutes: 1
+      with:
+        artifact-ids: '[${{ toJSON(needs.record.outputs.certificate_artifact_id) }}]'
+    outputs:
+      attached: ${{ steps.result.outputs.attached }}
+  verdict:
+    permissions:
+      contents: read
+      actions: read
+    if: always()
+    needs:
+    - prepare
+    - check
+    - packages
+    - record
+    - attach
+    runs-on: ubuntu-24.04
+    env:
+      RESULTS: ${{ toJSON(needs) }}
+      EXECUTE: ${{ inputs.execute }}
+      PACKAGE_ENABLED: ${{ needs.prepare.outputs.package_enabled }}
+    steps:
+    - shell: python
+      run: |
+        import json,os
+        results=json.loads(os.environ['RESULTS'])
+        required=['prepare','check','record'] + (['attach'] if os.environ['EXECUTE']=='true' else [])
+        if os.environ['PACKAGE_ENABLED']=='true': required.append('packages')
+        if any(results[k]['result'] != 'success' for k in required): raise SystemExit('Incomplete or failed exact qualification; inspect retained evidence')
+    - name: Confirm complete workflow cleanup eligibility
+      if: success() && inputs.execute && !inputs.preserve_artifacts
+      run: echo 'Full attached certification passed; preceding full-run temporary evidence may be pruned after this run completes.'
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+  TAG: ${{ inputs.tag }}
+  INVENTORY: ${{ inputs.inventory }}
+  PREVIOUS_PACKAGES: ${{ inputs.previous_packages }}
+  TRUSTED_FINGERPRINT: ${{ vars.DISTRIBUTION_SIGNING_FINGERPRINT }}
+  PROFILE: ${{ inputs.profile }}
+  CERTIFICATION_JOBS: ${{ vars.FOUNDATION_CERTIFICATION_JOBS || '0' }}
+  LINUX_POOL: ${{ inputs.linux_pool }}
+  FOUNDATION_FASTER_LINUX_RUNNER: ${{ vars.FOUNDATION_FAST_LINUX_RUNNER }}
+  FOUNDATION_FASTER_ARM_RUNNER: ${{ vars.FOUNDATION_FAST_ARM_RUNNER }}
+  FOUNDATION_FASTER_WINDOWS_RUNNER: ${{ vars.FOUNDATION_FAST_WINDOWS_RUNNER }}
+  GRAPHICS_ARCHIVE_URL: ${{ inputs.graphics_archive_url }}

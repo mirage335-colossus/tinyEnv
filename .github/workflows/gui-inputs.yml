@@ -1,0 +1,75 @@
+name: Explicit retained GUI input maintenance
+'on':
+  workflow_dispatch:
+    inputs:
+      execute:
+        description: Publish verified redistributable complete group into base
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  actions: read
+env:
+  GH_TOKEN: ${{ github.token }}
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - run: python3 .github/scripts/lifecycle.py gui-maintain
+      id: maintain
+    - name: Retain complete GUI inputs privately for exact future reuse
+      run: python .github/scripts/lifecycle.py bundle-store
+      env:
+        BUNDLE_NAME: gui-inputs-${{ github.run_attempt }}
+        BUNDLE_PATHS: |-
+          build/gui-group/
+          build/gui-publication-plan.json
+    - if: always()
+      name: Retain verified gui-inspection-${{ github.run_attempt }}
+      run: python .github/scripts/lifecycle.py bundle-store
+      env:
+        BUNDLE_NAME: gui-inspection-${{ github.run_attempt }}
+        BUNDLE_PATHS: build/gui-publication-plan.json
+    - if: inputs.execute && steps.maintain.outputs.redistributable != 'true'
+      shell: python
+      run: raise SystemExit('GUI redistribution terms are unresolved; retained source stays private')
+    outputs:
+      redistributable: ${{ steps.maintain.outputs.redistributable }}
+    permissions:
+      contents: write
+      actions: read
+  publish:
+    if: inputs.execute && needs.prepare.outputs.redistributable == 'true'
+    needs: prepare
+    runs-on: ubuntu-24.04
+    environment: release-publisher
+    concurrency:
+      group: foundation-release-lifecycle
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      actions: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - shell: python
+      run: |
+        import subprocess,sys
+        subprocess.run([sys.executable,'.github/scripts/lifecycle.py','bundle-fetch'],check=True)
+      env:
+        BUNDLE_NAME: gui-inputs-${{ github.run_attempt }}
+        BUNDLE_OUTPUT: build
+    - run: python3 .github/scripts/lifecycle.py publish-gui
+    - if: always()
+      name: Retain verified gui-delivery-${{ github.run_attempt }}
+      run: python .github/scripts/lifecycle.py bundle-store
+      env:
+        BUNDLE_NAME: gui-delivery-${{ github.run_attempt }}
+        BUNDLE_PATHS: build/receipts/

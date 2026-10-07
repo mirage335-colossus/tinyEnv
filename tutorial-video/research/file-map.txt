@@ -1,0 +1,317 @@
+SOFTWARE FOUNDATION FILE MAP AND DISTRIBUTION FACTS — REVISION 2
+Read-only source investigation: 2026-10-06, America/Chicago.
+Foundation source: e33d72a3e2229e9c876f30dd1d52e583756ec1b9.
+Only this production research note was written. Application/editor/build/SDK/Git
+state was not changed. Primary facts below come from the checked-in source/docs.
+Online retrieval of the repository and raw files returned cache-miss failures;
+do not describe these findings as a fresh audit of the public Latest release.
+
+PRESENTATION PRINCIPLE
+
+Give each source file a concrete job, then connect it to one visible result.
+Start with a small function, known input and expected output. Reveal its caller,
+event and flow only after the arithmetic is understood. Infrastructure becomes
+the surrounding support for that algorithm; do not scroll through large files.
+Keep a readable path/function label visible while recording the actual editor.
+Use a focused file tree, short source excerpt and input/output diagram together.
+
+The main Entry-list application and the optional visual-editor starters have
+different source roots. Explain this distinction before opening the starter:
+"The repository's Entry-list application demonstrates the shared foundation.
+For the visual workflow, we will use its small Simple C starter. In your own
+project, these ordinary files become your application."
+
+MAIN APPLICATION: WHICH FILES TO EDIT
+
+- src/store.cpp + include/foundation/store.hpp
+  The Entry-list application's data behavior and public declarations. Store::add
+  is src/store.cpp:33–45; Store::update is :47–55. The public Record/Store types are
+  include/foundation/store.hpp:14–43. Change an existing function's implementation
+  in store.cpp. Change the header when the callable interface, public data types
+  or public contract changes. Add corresponding cases to tests/store_test.cpp.
+- rust/text_validation/src/lib.rs
+  The default Rust algorithm. validate_text at :11–19 accepts 1..256 printable
+  ASCII bytes; the private C ABI wrapper is :27–39. Native callers pass through
+  src/text_validation.h and src/text_validation.cpp. Algorithm-only changes inside
+  validate_text do not require a new GUI adapter. ABI changes require matched C
+  declarations/layouts and callers. Tests in this lib.rs begin at :58.
+- gui/shared/view_definition.hpp
+  Shared handwritten GUI layout: widget IDs, kinds, labels, heights, ordering.
+  The small view_definition array is :18–31. This is where the main application's
+  widgets are declared. Forms mode does not import this handwritten C++ layout.
+- gui/shared/application.cpp + gui/shared/application.hpp
+  Shared GUI state and event meaning. Application::handle and append_entry own
+  actions; application.hpp declares the Application class and state. This is the
+  application-side code that calls Store and updates shared widget state.
+- src/main.cpp
+  CLI argument handling and composition. Edit it when changing the CLI interface.
+- CMakeLists.txt:58
+  foundation_core lists ordinary implementation files. Add a new C++ algorithm
+  source with target_sources(foundation_core PRIVATE src/extra.cpp). Put its public
+  declarations in include/foundation/extra.hpp or private declarations beside
+  the implementation as appropriate; include that header in callers. Headers
+  declare functions/types and are not separate compiled translation units.
+- gui/CMakeLists.txt:28
+  foundation_gui_application owns shared GUI implementation. Add shared UI source
+  with target_sources(foundation_gui_application PRIVATE shared/extra.cpp).
+
+The main root project enables only CXX (CMakeLists.txt:2). A new true C source
+target also needs enable_language(C) or LANGUAGES C CXX in the adopting project.
+The Simple C example already supplies this and is the clearer beginner route.
+
+MAIN APPLICATION: WHAT SUPPORTS THE EDIT
+
+- gui/hosts/ and gui/host/: native/browser composition and host services.
+- gui/patches/: adaptations to retained generic GUI suppliers.
+- visual/ui/: optional shared form/event runtime.
+- visual/flow/: optional shared continuous processing runtime.
+- third_party/: pinned supplier inventory, source and notices; third_party/sdk/
+  documents retained target/compiler inputs. The algorithm remains ordinary source.
+- cmake/: target/build policy; tools/: build/release/evidence helpers.
+- .github/workflows/: CI, SDK preparation, application builds, certification,
+  release promotion and package production.
+- build/: generated build output; select separate build trees for differing targets.
+
+These support files are available when needed. A gain formula edit belongs to
+the algorithm source; a widget label edit belongs to the layout; a new source
+file belongs to the chosen CMake target. Present those jobs positively and stop
+once the viewer can locate the relevant owner.
+
+OPTIONAL SIMPLE C STARTER: A SMALL, COMPLETE FILE MAP
+
+All paths below share the root editor/examples/simple-c/.
+
+Goal                       Edit                                  Result
+Processing formula         signal.c                              Ordinary C algorithm
+Algorithm declarations     signal.h                              C types and signatures
+Run/Clear behavior          events.c                              Read controls, run, display
+Event callback contract     events.h                              C callable UI facade
+Form/flow composition       project.json via Forms/Flows           Saved design
+New C source membership     CMakeLists.txt, simple-c-behavior        C17 compilation
+New C++ source membership   CMakeLists.txt, executable target       C++20 compilation
+Algorithm expected results  main.cpp                              Display-free behavior check
+
+Boundary files (edit when extending the corresponding interface):
+event_adapter.cpp/.hpp maps C event callbacks to the shared C++ Ui.
+flow_adapter.cpp/.hpp maps bounded flow buffers to plain C functions.
+services.hpp owns the C state and graph pointer used by those bridges.
+
+Generated files (Save/Generate after composition changes):
+generated/visual/forms.hpp: widget snapshots/layout;
+generated/visual/events.hpp: ordinary handler registrations;
+generated/visual/flows.hpp: graph descriptors and ordinary block factories;
+generated/visual/design.json: generated design record.
+Keep handwritten logic in signal.c/events.c. Generated output is retained, so
+normal application compilation consumes it without running the editor.
+
+The starter's main.cpp deliberately uses gui::MemoryAdapter to check the actual
+generated form, event dispatch, gain selection, output text, buffer bounds and
+failure recovery. Its terminal output is a checked result. Editor Preview shows
+layout only and does not execute application handlers.
+
+CONCRETE PROCESSING PATH: FOUR INPUTS, ONE SMALL FUNCTION
+
+1. In the editor choose Examples > Simple C. Go to Flows.
+2. Source -> Gain -> Collector is a typed float flow.
+3. Double-click Gain; the navigation entry opens signal.c at simple_c_apply_gain.
+4. Show signal.c:20–22 only:
+       float simple_c_apply_gain(float sample, float gain) {
+           return sample * gain;
+       }
+5. Show data outside the source window: source_sample generates 1,2,3,4 (:16–18).
+   Gain 2 returns 2,4,6,8. Gain 0.5 returns 0.5,1,1.5,2.
+6. flow_adapter.cpp:43 is the caller: input[0] and services_.state.gain are passed
+   to this function; output[0] receives its result. The adapter accounts one input
+   consumed and one output produced at :44. The algorithm has no flow runtime API.
+7. Forms > double-click Run samples opens events.c:20–33. It reads the dropdown,
+   sets gain 2 or 0.5, resets sample count, disables Run, calls the flow, writes
+   the collected results through a helper, and enables Run. The C++ boundary
+   event_adapter.cpp:51–54 calls this C event function with its callback facade.
+
+SAFE ONE-LINE EDIT DEMONSTRATION (IN THE TUTORIAL'S COPIED PROJECT ONLY)
+
+Edit signal.c:21 to:
+    return sample * gain + 1.0f;
+Interface unchanged: two floats still enter and one float returns. signal.h,
+events.c, both adapters, layout and CMake membership remain applicable.
+Before: Gain 2 -> 2 4 6 8; Gain 0.5 -> 0.5 1 1.5 2.
+After:  Gain 2 -> 3 5 7 9; Gain 0.5 -> 1.5 2 2.5 3.
+These values follow directly from the shown expression; they are not a claim
+that the stock reference executable was run with this modification.
+
+The stock main.cpp has intentionally fixed independent expectations. A meaningful
+production demonstration should first show the changed output, then update the
+copied reference checks to the new intended contract, rebuild, and show PASS.
+Needed expectation edits in the unmodified reference are:
+- :23, expected sample is float(index + 1) * gain + 1.0f;
+- :55, "Output: 3 5 7 9";
+- :64 and :79, "Output: 1.5 2 2.5 3";
+- :81–82, printed description matching the changed output.
+Any additional captured Reset binding may change line locations. Use symbols
+and exact current bytes when applying edits to the tutorial's copied project.
+Do not make tests simply call the changed algorithm to obtain their expectation.
+
+Build recipes from the unmodified reference, executed in an independent project:
+    cmake -S editor/examples/simple-c -B build/editor-simple-c-check -G Ninja
+    cmake --build build/editor-simple-c-check --parallel 2
+    build/editor-simple-c-check/foundation-editor-simple-c
+For the tutorial's copied project, use its own source/build roots. The editor's
+Build/Run recipes assume that CMake has already configured the normal build tree.
+Source edits need rebuild; Forms/Flows composition edits need Save/Generate first.
+
+COMPLETE ADD-A-C-FILE WORKFLOW
+
+Example: extract or add a reusable offset helper in the copied Simple C project.
+1. Create offset.h with a guard, C++ extern "C" guard and:
+       float simple_c_offset(float sample, float offset);
+2. Create offset.c:
+       #include "offset.h"
+       float simple_c_offset(float sample, float offset) {
+           return sample + offset;
+       }
+3. In signal.c include "offset.h" and call:
+       return simple_c_offset(sample * gain, 1.0f);
+4. After add_library(simple-c-behavior STATIC signal.c events.c), add:
+       target_sources(simple-c-behavior PRIVATE offset.c)
+   The existing target is C17, and project LANGUAGES C CXX is already enabled.
+5. Rebuild the copied project's configured tree; CMake regenerates membership
+   and compiles offset.c as a separate C translation unit before linking it.
+6. Run the independent expected-value checks above. The result remains 3,5,7,9
+   at gain 2 and 1.5,2,2.5,3 at gain 0.5.
+7. For a changed public signature also update its declaration and caller. If the
+   helper is called inside an existing block, no new visual block is necessary.
+   A new independent block needs a factory/adapter and design composition too.
+
+COMPLETE ADD-A-C++-FILE WORKFLOW
+
+The Simple C++ example already enables CXX and keeps ordinary code in
+editor/examples/simple/signal.cpp and events.cpp.
+1. Create extra.hpp with its declaration and extra.cpp with implementation.
+2. Include extra.hpp and call the function from events.cpp or signal.cpp.
+3. In that project's CMakeLists.txt, after the executable is defined, add:
+       target_sources(foundation-editor-simple PRIVATE extra.cpp)
+4. Rebuild the same configured tree and run independent expected results.
+For C++ UI helpers in the Simple C project, use target
+foundation-editor-simple-c rather than the C17 simple-c-behavior library.
+
+RUST DSP: WHICH FILES, INTERFACE AND RESULTS
+
+All paths share editor/examples/rust-dsp/.
+- dsp.rs:23–47 owns process_samples, a three-tap FIR with coefficients
+  [0.25,0.5,0.25], followed by decimation by two. Its key formula is :32.
+- dsp.rs:55–85 owns the exported C ABI function foundation_rust_dsp_process.
+- dsp.h:10–32 matches shared structs and declares that ABI to C/C++ callers.
+- flow_adapter.cpp/.hpp wraps input/output buffers and persistent stream state.
+- project.json owns Source -> Rust FIR/decimate 2 -> Collector composition.
+- main.cpp owns independent algorithm/ABI/flow expectations.
+- CMakeLists.txt:29–34 compiles the Rust static archive from existing rustc;
+  :44–51 defines/links the ordinary C++ executable to the imported Rust archive.
+
+Known reference vectors in main.cpp:
+Input 1,2,3,4,5,6,7,8,9 -> output 1,3,5,7 (9 inputs consumed, 4 outputs produced).
+Input 1,0,0,0,2,2,2,-1,4 -> output 0.5,0,1.5,1.25.
+Each stream keeps its previous two samples and phase across chunk boundaries.
+Output capacity can stop consumption before an output-due sample, preserving
+history; restarting the graph creates fresh state. Do not describe this as gain.
+
+COMPLETE ADD-A-RUST-MODULE WORKFLOW: OPTIONAL DSP PROJECT
+
+1. Create coefficients.rs beside dsp.rs:
+       pub fn fir(sample: f32, newer: f32, older: f32) -> f32 {
+           0.25 * sample + 0.5 * newer + 0.25 * older
+       }
+2. Keep #![no_std] first in dsp.rs; add mod coefficients; below the crate attribute.
+3. Replace the formula at :32 with:
+       let filtered = coefficients::fir(sample, state.newer, state.older);
+4. In CMakeLists.txt add coefficients.rs to the custom command's DEPENDS alongside
+   dsp.rs; this project invokes rustc directly, so explicit dependency membership
+   ensures the Rust archive rebuilds after the new module changes.
+5. Rebuild, relink and run the existing independent vectors/chunk/backpressure
+   checks. dsp.h remains applicable because the external ABI has not changed.
+6. A newly exported Rust function needs a matching #[no_mangle] extern "C"
+   declaration in Rust, a declaration/layout in dsp.h, and a caller linked to the
+   archive. Keep live/aligned/disjoint buffers valid for the synchronous call.
+
+COMPLETE ADD-A-RUST-MODULE WORKFLOW: MAIN APPLICATION
+
+1. Add rust/text_validation/src/helper.rs with the new dependency-free function.
+2. Add mod helper; to rust/text_validation/src/lib.rs and call helper::function
+   from the owning logic or existing exported wrapper.
+3. The main cmake/RustComponent.cmake:143–145 tracks .rs files recursively with
+   CONFIGURE_DEPENDS; a source module inside the existing crate needs no new
+   CMake source-list entry. Rebuild via the supported build.sh entry point.
+4. Run focused Rust unit and boundary tests relevant to the changed contract.
+5. Update src/text_validation.h and callers only when the C ABI changes.
+The current retained toolchain policy deliberately permits one dependency-free
+workspace member, edition 2021 and Rust 1.63. Adding module files is supported;
+adding an external crate/workspace member also requires adapting the documented
+retention/policy and build checks (tools/rust_build.py:335–355).
+
+DIRECT GITHUB LATEST / OS PACKAGE-MANAGER CONNECTION
+
+Suggested viewer wording:
+"Software Foundation brings GitHub Latest releases and distribution package
+managers together. CI builds the application and formats its signed release
+assets as package repositories. APT and pacman connect directly to the project's
+Latest release URL, so the user's operating system fetches packages and normal
+updates from CI-built releases. The project does not need a separately hosted
+package repository. Gentoo follows Latest through the included verified sync
+adapter, which pins the exact release tag before activating its overlay."
+
+Precise checked-in evidence:
+- docs/distribution-release.md:5–10: package repositories are ordinary release
+  assets, built/signed before the candidate inventory freezes; no separate mirror.
+- :12–23: signed metadata, combined APT index (amd64/arm64), flat Arch database
+  (x86_64), signed native bundles and retained Gentoo inputs.
+- :33–47: APT/pacman root is
+      https://github.com/OWNER/REPOSITORY/releases/latest/download/
+  APT uses a trusted key and flat suite ./; pacman uses Required DatabaseRequired
+  and the same URL as Server. apt-get update / pacman -Syu discover promotion.
+  Gentoo's trusted distro_client.py track=latest pins/verifies a tag and uses the
+  Portage sync adapter; it is not a direct pacman-style HTTP database configuration.
+- tools/release_packages.py:31–33 defines Latest/exact-tag base URLs.
+- :321–335 generates actual INSTALL.md APT/pacman/Portage configuration.
+- :381–404 creates native packages and APT repo using the Latest base URL.
+- .github/workflows/_release-latest.yml:116–129 calls sdk-application.yml with
+  require_regression: true and package_repository: true.
+- docs/distribution-release.md:77–80 records the completed all-GUI/Rust release
+  and eight native predecessor upgrades; the cited public run is 37394012851.
+Independent key trust, signatures and valid metadata are part of the mechanism.
+Keep this operationally clear without adding a long warning segment.
+
+Documentation discrepancy to avoid showing in the recording:
+.github/WORKFLOWS.md:90–91 retains an older "next rebuild ... not qualified"
+sentence. docs/distribution-release.md:77–80 and docs/validation.md carry the newer
+completed qualification. Do not modify the application docs as part of this task.
+
+PRIMARY LINKS (PINNED TO INVESTIGATED SOURCE)
+
+https://github.com/mirage335-colossus/software-foundation/blob/e33d72a3e2229e9c876f30dd1d52e583756ec1b9/docs/architecture.md
+https://github.com/mirage335-colossus/software-foundation/blob/e33d72a3e2229e9c876f30dd1d52e583756ec1b9/editor/README.md#source-and-application-integration
+https://github.com/mirage335-colossus/software-foundation/blob/e33d72a3e2229e9c876f30dd1d52e583756ec1b9/editor/examples/simple-c/README.md
+https://github.com/mirage335-colossus/software-foundation/blob/e33d72a3e2229e9c876f30dd1d52e583756ec1b9/editor/examples/simple-c/signal.c#L20-L22
+https://github.com/mirage335-colossus/software-foundation/blob/e33d72a3e2229e9c876f30dd1d52e583756ec1b9/editor/examples/rust-dsp/dsp.rs#L19-L47
+https://github.com/mirage335-colossus/software-foundation/blob/e33d72a3e2229e9c876f30dd1d52e583756ec1b9/docs/distribution-release.md#application-release-packages
+https://github.com/mirage335-colossus/software-foundation/blob/e33d72a3e2229e9c876f30dd1d52e583756ec1b9/tools/release_packages.py#L321-L335
+
+WORDING AND SCOPE FOR THE REVISED VIDEOS
+
+Future projects naturally share needs such as GUI behavior, continuous processing,
+tests, reproducible builds, dependency availability and package delivery. This is
+an inclusive set of reusable capabilities. Say future projects can add their own
+algorithms, devices, libraries and requirements; avoid framing reuse as limited
+to projects with exactly the same pain points.
+
+Lead the capabilities video with the intended reduction in repeated development
+from roughly two weeks to hours. Then show ordinary C/C++/Rust code connected to
+a visually programmable event-driven GUI, visual flow composition, and tested
+portability/release systems ready for future development. Present the time figures
+as intended benefits and possibilities without attributing an opinion to the team.
+Use "development", "foundation work", "reusable groundwork", "starting point".
+Avoid the user-rejected terms and a leading rhetorical question about Visual Basic.
+If mentioned, visual form familiarity can follow the full-language explanation.
+
+Computer vision and peripherals are plausible applications of custom blocks and
+ordinary source; no supplied computer-vision algorithm was found in these examples.
+Seven main GUI hosts do not mean the editor itself supports seven authoring hosts.
+The main application and optional editor have separately documented qualification.

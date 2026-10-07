@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "kind": "official-rust-components",
+  "version": "1.63.0",
+  "cargo_version": "1.63.0",
+  "host": "x86_64-pc-windows-msvc",
+  "target": "x86_64-pc-windows-msvc",
+  "release_date": "2022-08-11",
+  "compiler_commit": "4b91a6ea7258a947e59c6522cd5898e7c0a6a88f",
+  "cargo_commit": "fd9c4297c",
+  "cargo_package_version": "0.64.0",
+  "bootstrap": {"version": "1.62.0", "date": "2022-06-30"},
+  "inputs": [
+    {"name": "stage0-rustc", "file": "rustc-1.62.0-x86_64-pc-windows-msvc.tar.xz", "url": "https://static.rust-lang.org/dist/2022-06-30/rustc-1.62.0-x86_64-pc-windows-msvc.tar.xz", "sha256": "66b8e7957fe0b0d5eb48a32b93c7177f0f15ffd285486c376abff5783600bc2b", "form": "official-bootstrap-binary"},
+    {"name": "stage0-cargo", "file": "cargo-1.62.0-x86_64-pc-windows-msvc.tar.xz", "url": "https://static.rust-lang.org/dist/2022-06-30/cargo-1.62.0-x86_64-pc-windows-msvc.tar.xz", "sha256": "407790462a9ed376299d602d038f5f9a58eac072d38872110327fea26022a41e", "form": "official-bootstrap-binary"},
+    {"name": "stage0-std", "file": "rust-std-1.62.0-x86_64-pc-windows-msvc.tar.xz", "url": "https://static.rust-lang.org/dist/2022-06-30/rust-std-1.62.0-x86_64-pc-windows-msvc.tar.xz", "sha256": "e00f96ec3f88fb39ac1bd17840a2ac1592df30cdf7f8c277cfb36596ebd7fd5f", "form": "official-bootstrap-binary"},
+    {"name": "rustc", "file": "rustc-1.63.0-x86_64-pc-windows-msvc.tar.xz", "url": "https://static.rust-lang.org/dist/2022-08-11/rustc-1.63.0-x86_64-pc-windows-msvc.tar.xz", "sha256": "c953562b6ce63b2cd8d36dcc3d6c598ca430b041573961e942ce978ee7e68522", "form": "official-precompiled"},
+    {"name": "cargo", "file": "cargo-1.63.0-x86_64-pc-windows-msvc.tar.xz", "url": "https://static.rust-lang.org/dist/2022-08-11/cargo-1.63.0-x86_64-pc-windows-msvc.tar.xz", "sha256": "5e7eb636ac2632a2c729b07fee84a3c37ede355b352dd36778b304d5f322e6f4", "form": "official-precompiled"},
+    {"name": "host-std", "file": "rust-std-1.63.0-x86_64-pc-windows-msvc.tar.xz", "url": "https://static.rust-lang.org/dist/2022-08-11/rust-std-1.63.0-x86_64-pc-windows-msvc.tar.xz", "sha256": "3b336cb1a423f37fa9fd1927a311f1daf32ebfc0e48cb430178995c942bc4fa3", "form": "official-precompiled"},
+    {"name": "rust-src", "file": "rust-src-1.63.0.tar.xz", "url": "https://static.rust-lang.org/dist/2022-08-11/rust-src-1.63.0.tar.xz", "sha256": "d4f84d50ea61630df493db5cb1f71e7429f4118e7dbf6af5eb548910abac517d", "form": "source"},
+    {"name": "compiler-source", "file": "rustc-1.63.0-src.tar.xz", "url": "https://static.rust-lang.org/dist/2022-08-11/rustc-1.63.0-src.tar.xz", "sha256": "8f44af6dc44cc4146634a4dd5e4cc5470b3052a2337019b870c0e025e8987e0c", "form": "source-with-vendored-dependencies"},
+    {"name": "release-manifest", "file": "channel-rust-1.63.0.toml", "url": "https://static.rust-lang.org/dist/channel-rust-1.63.0.toml", "sha256": "297c7e203d32e268360772c7a7b2326a232b75ec45ea872d0039c0b4520e8eb6", "form": "official-release-metadata"}
+  ],
+  "recovery_scope": "Offline restoration from the exact retained official compiler, Cargo, target-library and source archives. Compiler/Cargo reconstruction from source and a complete source-build bootstrap closure are not qualified."
+}

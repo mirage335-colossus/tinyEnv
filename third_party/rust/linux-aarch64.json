@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "kind": "official-rust-components",
+  "version": "1.63.0",
+  "cargo_version": "1.63.0",
+  "host": "aarch64-unknown-linux-gnu",
+  "target": "aarch64-unknown-linux-gnu",
+  "release_date": "2022-08-11",
+  "compiler_commit": "4b91a6ea7258a947e59c6522cd5898e7c0a6a88f",
+  "cargo_commit": "fd9c4297c",
+  "cargo_package_version": "0.64.0",
+  "bootstrap": {"version": "1.62.0", "date": "2022-06-30"},
+  "inputs": [
+    {"name": "stage0-rustc", "file": "rustc-1.62.0-aarch64-unknown-linux-gnu.tar.xz", "url": "https://static.rust-lang.org/dist/2022-06-30/rustc-1.62.0-aarch64-unknown-linux-gnu.tar.xz", "sha256": "0fa320a19d41dcfc592bc006f5e9eda8e3b972598a26c96ad64eedd868516df3", "form": "official-bootstrap-binary"},
+    {"name": "stage0-cargo", "file": "cargo-1.62.0-aarch64-unknown-linux-gnu.tar.xz", "url": "https://static.rust-lang.org/dist/2022-06-30/cargo-1.62.0-aarch64-unknown-linux-gnu.tar.xz", "sha256": "475038ecacca9ff586cad2082d5d950544b0d581a2a287facc7d899aae488813", "form": "official-bootstrap-binary"},
+    {"name": "stage0-std", "file": "rust-std-1.62.0-aarch64-unknown-linux-gnu.tar.xz", "url": "https://static.rust-lang.org/dist/2022-06-30/rust-std-1.62.0-aarch64-unknown-linux-gnu.tar.xz", "sha256": "dd5df8a92af3e5d49a1122b9561821ebd72a9317884a37ecddae041e652a7563", "form": "official-bootstrap-binary"},
+    {"name": "rustc", "file": "rustc-1.63.0-aarch64-unknown-linux-gnu.tar.xz", "url": "https://static.rust-lang.org/dist/2022-08-11/rustc-1.63.0-aarch64-unknown-linux-gnu.tar.xz", "sha256": "d78799bb8f4177877f97b9051c9cba1fd85173f2e9cecab9486388fc6fa66259", "form": "official-precompiled"},
+    {"name": "cargo", "file": "cargo-1.63.0-aarch64-unknown-linux-gnu.tar.xz", "url": "https://static.rust-lang.org/dist/2022-08-11/cargo-1.63.0-aarch64-unknown-linux-gnu.tar.xz", "sha256": "4313ab44dccba4faed20db4aacc16def405773d1676e79d3e65ced4b99d710d4", "form": "official-precompiled"},
+    {"name": "host-std", "file": "rust-std-1.63.0-aarch64-unknown-linux-gnu.tar.xz", "url": "https://static.rust-lang.org/dist/2022-08-11/rust-std-1.63.0-aarch64-unknown-linux-gnu.tar.xz", "sha256": "f1d93b3d48258f701687c63ef9b226c07329fb92c2c5559283258687f958e9d0", "form": "official-precompiled"},
+    {"name": "rust-src", "file": "rust-src-1.63.0.tar.xz", "url": "https://static.rust-lang.org/dist/2022-08-11/rust-src-1.63.0.tar.xz", "sha256": "d4f84d50ea61630df493db5cb1f71e7429f4118e7dbf6af5eb548910abac517d", "form": "source"},
+    {"name": "compiler-source", "file": "rustc-1.63.0-src.tar.xz", "url": "https://static.rust-lang.org/dist/2022-08-11/rustc-1.63.0-src.tar.xz", "sha256": "8f44af6dc44cc4146634a4dd5e4cc5470b3052a2337019b870c0e025e8987e0c", "form": "source-with-vendored-dependencies"},
+    {"name": "release-manifest", "file": "channel-rust-1.63.0.toml", "url": "https://static.rust-lang.org/dist/channel-rust-1.63.0.toml", "sha256": "297c7e203d32e268360772c7a7b2326a232b75ec45ea872d0039c0b4520e8eb6", "form": "official-release-metadata"}
+  ],
+  "recovery_scope": "Offline restoration from the exact retained official compiler, Cargo, target-library and source archives. Compiler/Cargo reconstruction from source and a complete source-build bootstrap closure are not qualified."
+}

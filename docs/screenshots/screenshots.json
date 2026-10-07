@@ -1,0 +1,474 @@
+{
+  "attempt": 1,
+  "binaries": {
+    "native/gui/foundation-gui-fltk": "a21cd9aa7bfad1c84ff7efc708a0af54e1f6caee17f5ed6c4223ce4204a33620",
+    "native/gui/foundation-gui-framebuffer": "8daa57131abdb81cd7ed216624e4cce4da0a4a0bf1a856b32eb15bed38b3eefa",
+    "native/gui/foundation-gui-rev": "59e44c35987630f97608e595a23960ee5a34cb8d79428dbcfe30aa48b496990c",
+    "native/gui/foundation-gui-sdl": "e07493f468a12002ab820d5ed507c78036e9fd166c880efb008db8ae55670315",
+    "native/gui/foundation-gui-terminal": "7ac1151d793fc758b0955036f8adedf1a46a174276de268d9ea981a90da87350",
+    "native/gui/foundation-gui-web": "e074a34b183f8a4d80ae0da82641e9b15f59889e59d5173a018b2d3330176b0e",
+    "wasm/gui/gui_web_wasm.js": "bff4e025359db42610ebcd5dfc2c77fbd80a04c42933058b0d2ff4f264a6d1ac",
+    "wasm/gui/gui_web_wasm.wasm": "e7cc3015b8a0f6f7dc3f3f7b24cfa6b42d5b1a4fc5b0dbe8e40e7e90ad6c4ad1"
+  },
+  "captures": {
+    "browser": {
+      "browserName": "chrome",
+      "browserVersion": "154.0.8037.57",
+      "sandbox": {
+        "evaluation": "You are adequately sandboxed.",
+        "first_layer": "namespace",
+        "network_namespaces": true,
+        "pid_namespaces": true,
+        "rows": [
+          [
+            "Layer 1 Sandbox",
+            "Namespace"
+          ],
+          [
+            "PID namespaces",
+            "Yes"
+          ],
+          [
+            "Network namespaces",
+            "Yes"
+          ],
+          [
+            "Seccomp-BPF sandbox",
+            "Yes"
+          ],
+          [
+            "Seccomp-BPF sandbox supports TSYNC",
+            "Yes"
+          ],
+          [
+            "Ptrace Protection with Yama LSM (Broker)",
+            "Yes"
+          ],
+          [
+            "Ptrace Protection with Yama LSM (Non-broker)",
+            "No"
+          ]
+        ],
+        "seccomp_bpf": true,
+        "seccomp_tsync": true
+      }
+    },
+    "fltk": {
+      "colors": 1696,
+      "height": 480,
+      "surface": "native-window",
+      "width": 640
+    },
+    "framebuffer": {
+      "colors": 48,
+      "height": 480,
+      "surface": "application-framebuffer",
+      "width": 640
+    },
+    "hosted-web": {
+      "colors": 1689,
+      "geometry": [
+        {
+          "box": [
+            16,
+            16,
+            608,
+            412
+          ],
+          "key": "[\"entries.form\",\"1\"]"
+        },
+        {
+          "box": [
+            24,
+            24,
+            592,
+            32
+          ],
+          "key": "[\"entries.heading\",\"1\"]"
+        },
+        {
+          "box": [
+            24,
+            60,
+            592,
+            32
+          ],
+          "key": "[\"entries.editor\",\"1\"]"
+        },
+        {
+          "box": [
+            24,
+            96,
+            592,
+            32
+          ],
+          "key": "[\"entries.add\",\"1\"]"
+        },
+        {
+          "box": [
+            24,
+            132,
+            592,
+            32
+          ],
+          "key": "[\"entries.options\",\"1\"]"
+        },
+        {
+          "box": [
+            24,
+            168,
+            592,
+            32
+          ],
+          "key": "[\"entries.task.start\",\"1\"]"
+        },
+        {
+          "box": [
+            24,
+            204,
+            592,
+            32
+          ],
+          "key": "[\"entries.task.cancel\",\"1\"]"
+        },
+        {
+          "box": [
+            24,
+            240,
+            592,
+            32
+          ],
+          "key": "[\"entries.task.status\",\"1\"]"
+        },
+        {
+          "box": [
+            24,
+            276,
+            592,
+            72
+          ],
+          "key": "[\"entries.list\",\"1\"]"
+        },
+        {
+          "box": [
+            24,
+            352,
+            592,
+            32
+          ],
+          "key": "[\"entries.count\",\"1\"]"
+        },
+        {
+          "box": [
+            24,
+            388,
+            592,
+            32
+          ],
+          "key": "[\"entries.status\",\"1\"]"
+        }
+      ],
+      "height": 480,
+      "mode": "hosted",
+      "surface": "browser-viewport",
+      "width": 640
+    },
+    "rev": {
+      "colors": 577,
+      "height": 480,
+      "surface": "native-window",
+      "width": 640
+    },
+    "sdl": {
+      "colors": 48,
+      "height": 480,
+      "surface": "native-window",
+      "width": 640
+    },
+    "terminal": {
+      "colors": 2218,
+      "height": 531,
+      "surface": "native-window",
+      "width": 644
+    },
+    "wasm": {
+      "colors": 1689,
+      "geometry": [
+        {
+          "box": [
+            16,
+            16,
+            608,
+            412
+          ],
+          "key": "[\"entries.form\",\"1\"]"
+        },
+        {
+          "box": [
+            24,
+            24,
+            592,
+            32
+          ],
+          "key": "[\"entries.heading\",\"1\"]"
+        },
+        {
+          "box": [
+            24,
+            60,
+            592,
+            32
+          ],
+          "key": "[\"entries.editor\",\"1\"]"
+        },
+        {
+          "box": [
+            24,
+            96,
+            592,
+            32
+          ],
+          "key": "[\"entries.add\",\"1\"]"
+        },
+        {
+          "box": [
+            24,
+            132,
+            592,
+            32
+          ],
+          "key": "[\"entries.options\",\"1\"]"
+        },
+        {
+          "box": [
+            24,
+            168,
+            592,
+            32
+          ],
+          "key": "[\"entries.task.start\",\"1\"]"
+        },
+        {
+          "box": [
+            24,
+            204,
+            592,
+            32
+          ],
+          "key": "[\"entries.task.cancel\",\"1\"]"
+        },
+        {
+          "box": [
+            24,
+            240,
+            592,
+            32
+          ],
+          "key": "[\"entries.task.status\",\"1\"]"
+        },
+        {
+          "box": [
+            24,
+            276,
+            592,
+            72
+          ],
+          "key": "[\"entries.list\",\"1\"]"
+        },
+        {
+          "box": [
+            24,
+            352,
+            592,
+            32
+          ],
+          "key": "[\"entries.count\",\"1\"]"
+        },
+        {
+          "box": [
+            24,
+            388,
+            592,
+            32
+          ],
+          "key": "[\"entries.status\",\"1\"]"
+        }
+      ],
+      "height": 480,
+      "mode": "wasm",
+      "surface": "browser-viewport",
+      "width": 640
+    }
+  },
+  "core_provider": "rust",
+  "dependencies": {
+    "native": {
+      "sdk-3e7438a4b5ee7a4baf5d7abacbdd320087aab42f24ea021f0f023b61db55bb33-SHA256SUMS": "13de860c7888f996fbbeae8df714a728b590bd37918a951e0005be84eee55909",
+      "sdk-3e7438a4b5ee7a4baf5d7abacbdd320087aab42f24ea021f0f023b61db55bb33-binary.tar.gz": "806c37b93379c0d40b7ec6b34a421fd9cebe175cd64a1f29cb196d4c0f8e87d2",
+      "sdk-3e7438a4b5ee7a4baf5d7abacbdd320087aab42f24ea021f0f023b61db55bb33-sources.tar.gz": "8d65f6d11d1e3d70ad51c507b6692bee3b576ac6318927bf85e619578686a72a"
+    },
+    "wasm": {
+      "sdk-74f5153e31c23f899f01d8340ffa4aba7f5a8ed81b0db206e6da8a1b38ece541-SHA256SUMS": "f94388c4d18c981675145868baccc96bcaa83cc709b5d075de117ade4e0d5c71",
+      "sdk-74f5153e31c23f899f01d8340ffa4aba7f5a8ed81b0db206e6da8a1b38ece541-binary.tar.gz": "1fa09b1f4f418beae45aa6bba76396fef1eb6bad9d103ab69a676f1ce701e928",
+      "sdk-74f5153e31c23f899f01d8340ffa4aba7f5a8ed81b0db206e6da8a1b38ece541-sources.tar.gz": "9713293c582293ecf734ceb18f3f16fed936f872085bc614ff6161ed9ab6d37b"
+    }
+  },
+  "display_dpi": 96,
+  "display_scale": 1,
+  "distribution": {
+    "BUG_REPORT_URL": "https://bugs.launchpad.net/ubuntu/",
+    "HOME_URL": "https://www.ubuntu.com/",
+    "ID": "ubuntu",
+    "ID_LIKE": "debian",
+    "LOGO": "ubuntu-logo",
+    "NAME": "Ubuntu",
+    "PRETTY_NAME": "Ubuntu 24.04.5 LTS",
+    "PRIVACY_POLICY_URL": "https://www.ubuntu.com/legal/terms-and-policies/privacy-policy",
+    "SUPPORT_URL": "https://help.ubuntu.com/",
+    "UBUNTU_CODENAME": "noble",
+    "VERSION": "24.04.5 LTS (Noble Numbat)",
+    "VERSION_CODENAME": "noble",
+    "VERSION_ID": "24.04"
+  },
+  "gui_group": {
+    "archive_sha256": "e77ed3649430a5807ce4b86320671e0a696ff69e43b5bd6885f837d000884a6f",
+    "license": "CC0-1.0",
+    "manifest_sha256": "bf9a364b252e94ed507a4f8af66e9e48c4b29f64357ee171a256f1108206650b",
+    "redistributable": true,
+    "revision": "7a704f73e563a167ea335dd23ccd9f383ebec274",
+    "source_tree": "2b8c513263e5eb531f9985dc2c6e1173b2b37d0e",
+    "upstream": "https://github.com/mirage335-colossus/gui-boundary"
+  },
+  "host": {
+    "machine": "x86_64",
+    "python": "3.12.3",
+    "release": "6.17.0-1022-azure",
+    "system": "linux",
+    "target": "linux-x86_64"
+  },
+  "images": {
+    "fltk.png": {
+      "dimensions": [
+        640,
+        480
+      ],
+      "sha256": "f6a459900c99d50f25bc281d9d385cf8f99f124c53c985d086d340e6664a73d0",
+      "size": 13764
+    },
+    "framebuffer.png": {
+      "dimensions": [
+        640,
+        480
+      ],
+      "sha256": "35f0e94307a47ee1938aaf00a378fd2415e46d418ccf3c017ce751d5d2ab0c1b",
+      "size": 4485
+    },
+    "hosted-web.png": {
+      "dimensions": [
+        640,
+        480
+      ],
+      "sha256": "de15b044be504ffea36cb548fb2a84e79ad4ec21f66ec8ff68f70cab9e7050c4",
+      "size": 15415
+    },
+    "rev.png": {
+      "dimensions": [
+        640,
+        480
+      ],
+      "sha256": "56828f1d421a52152f1fd9f04c166445af9279d87ec0917ad0aca095e89a011e",
+      "size": 13250
+    },
+    "sdl.png": {
+      "dimensions": [
+        640,
+        480
+      ],
+      "sha256": "96d86890108b4b37f9420709ce3178173b8aff886e4db29d0542fb73c36ea185",
+      "size": 4106
+    },
+    "terminal.png": {
+      "dimensions": [
+        644,
+        531
+      ],
+      "sha256": "c29bb07da0dfd89db6fe031c299c8b3d732528adc1d5d3c557397d3b38bd6927",
+      "size": 19593
+    },
+    "wasm.png": {
+      "dimensions": [
+        640,
+        480
+      ],
+      "sha256": "de15b044be504ffea36cb548fb2a84e79ad4ec21f66ec8ff68f70cab9e7050c4",
+      "size": 15415
+    }
+  },
+  "kind": "initial-view-gallery",
+  "logical_viewport": [
+    640,
+    480
+  ],
+  "origins": {
+    "native": {
+      "origin": "base",
+      "recipe": "3e7438a4b5ee7a4baf5d7abacbdd320087aab42f24ea021f0f023b61db55bb33"
+    },
+    "wasm": {
+      "origin": "base",
+      "recipe": "74f5153e31c23f899f01d8340ffa4aba7f5a8ed81b0db206e6da8a1b38ece541"
+    }
+  },
+  "recipes": {
+    "native": "3e7438a4b5ee7a4baf5d7abacbdd320087aab42f24ea021f0f023b61db55bb33",
+    "wasm": "74f5153e31c23f899f01d8340ffa4aba7f5a8ed81b0db206e6da8a1b38ece541"
+  },
+  "run_id": "37383282720",
+  "rust": {
+    "native": {
+      "core_provider": "rust",
+      "group_files": {
+        "rust-sdk-888eaacdca83ecc2d518a2062e13b65d43fdbe6188ee6daaf29713f2aabb13cd-SHA256SUMS": "8f5e7ece7978ae5e02c7deea1939460483e1e00d26346ba00c50a711e8be22fe",
+        "rust-sdk-888eaacdca83ecc2d518a2062e13b65d43fdbe6188ee6daaf29713f2aabb13cd-binary.tar.gz": "da56c68ab8c93891c873194fe1dc07669a1b2d11e441dd8ff726c371c7f0f876",
+        "rust-sdk-888eaacdca83ecc2d518a2062e13b65d43fdbe6188ee6daaf29713f2aabb13cd-sources.tar.gz": "6a985fce3dbb8f50c070704f82e42192362cb7d6f99fe99fbfa5b15f6cd99db2"
+      },
+      "origin": {
+        "origin": "base",
+        "recipe": "888eaacdca83ecc2d518a2062e13b65d43fdbe6188ee6daaf29713f2aabb13cd"
+      },
+      "rust_compiler_sha256": "ee914b3ecc3b4c754dc05ac1219ac80e1890a705b56d381a4f21d157b0ec0091",
+      "rust_compiler_version": "1.63.0",
+      "rust_sdk_manifest_sha256": "2718fb5977a22e9c4ed13bf435e5b221dc98282c81b95affa5082747c615f650",
+      "rust_sdk_recipe_id": "888eaacdca83ecc2d518a2062e13b65d43fdbe6188ee6daaf29713f2aabb13cd",
+      "rust_target": "x86_64-unknown-linux-gnu"
+    },
+    "wasm": {
+      "core_provider": "rust",
+      "group_files": {
+        "rust-sdk-f9e35b94f0f7c65b7f2c7fe6d8af2c93fee6056d572ed2943c2dc6ea81f609f4-SHA256SUMS": "05f0ebab8bd01170a998c2874d9b88bc861e5bb6781900c65727d62ea3160256",
+        "rust-sdk-f9e35b94f0f7c65b7f2c7fe6d8af2c93fee6056d572ed2943c2dc6ea81f609f4-binary.tar.gz": "0dd70ae1adcb1d313e82cefd0821534d8d9408f50511e7a2007b7612239d39fc",
+        "rust-sdk-f9e35b94f0f7c65b7f2c7fe6d8af2c93fee6056d572ed2943c2dc6ea81f609f4-sources.tar.gz": "5a03101615817a5f06e16c8deb8a1fb4d1ef4a54f96cab29221435f465a52568"
+      },
+      "origin": {
+        "origin": "base",
+        "recipe": "f9e35b94f0f7c65b7f2c7fe6d8af2c93fee6056d572ed2943c2dc6ea81f609f4"
+      },
+      "rust_compiler_sha256": "ee914b3ecc3b4c754dc05ac1219ac80e1890a705b56d381a4f21d157b0ec0091",
+      "rust_compiler_version": "1.63.0",
+      "rust_sdk_manifest_sha256": "b62531d299c5423dd4bc86d78dab7be8dee2bff2ef33a7b808142579e81a0933",
+      "rust_sdk_recipe_id": "f9e35b94f0f7c65b7f2c7fe6d8af2c93fee6056d572ed2943c2dc6ea81f609f4",
+      "rust_target": "wasm32-unknown-emscripten"
+    }
+  },
+  "schema_version": 2,
+  "source_commit": "2e33720a73f0686dc1ffe72992dfb52e472cd059",
+  "source_sha256": "36c220841f794c793c224600720a36a9853f489f90be63f382e660f94849a6ae",
+  "state": "fresh initial application",
+  "terminal": "80x31 cells; DejaVu Sans Mono 10pt; status row and terminal border retained",
+  "tools": {
+    "browser": "Google Chrome 154.0.8037.57",
+    "chromedriver": "ChromeDriver 154.0.8037.57 (73c14f6228d7cd537c855007e8f88678969cc0eb-refs/branch-heads/8037@{#1293})",
+    "cmake": "cmake version 3.31.6",
+    "xterm": "XTerm(390)"
+  }
+}

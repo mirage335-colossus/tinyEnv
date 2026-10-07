@@ -1,0 +1,163 @@
+--- renderer.mjs
++++ renderer.mjs
+@@ -110,7 +110,8 @@
+   constructor(root, pages, send, document = globalThis.document) {
+     this.root = root; this.pages = pages; this.send = send; this.document = document;
+     this.nodes = new Map(); this.pendingEdits = new Map(); this.editVersion = 0;
+-    this.measurements = new Set(); this.lastFocus = null; this.snapshot = null; this.pointerSerial = 0n;
++    this.measurements = new Set(); this.measureRequests = new Map(); this.measureAttempts = new Set(); this.measureTimer = null; this.measureProbe = null;
++    this.destroyed = false; this.lastFocus = null; this.snapshot = null; this.pointerSerial = 0n;
+     this.activePointers = new Set();this.pointerCancelEpoch=0n;
+     for(const kind of ["blur","pagehide"])this.document.defaultView?.addEventListener(kind,()=>this.cancelPointers());
+     this.root.addEventListener("wheel", event => this.groupWheel(event), {passive: false});
+@@ -133,7 +134,9 @@
+   operation(widget, type, values = {}, coalesce = null) {
+     return this.send({type, key: widget.key, ...values}, coalesce).catch(() => {});
+   }
+-  current(key) { return this.snapshot.widgets.find(widget => identity(widget.key) === identity(key)); }
++  // Acknowledgment callbacks need accepted data even while the next paint waits.
++  acceptSnapshot(snapshot) { this.acceptedSnapshot = snapshot; }
++  current(key) { return (this.acceptedSnapshot || this.snapshot).widgets.find(widget => identity(widget.key) === identity(key)); }
+   setFont(node, font) {
+     node.style.fontSize = `${font.size}px`; node.style.fontWeight = font.bold ? "700" : "400";
+     node.style.color = ["var(--text)", "var(--muted)", "var(--accent)", "var(--error)"][font.tone];
+@@ -363,22 +366,42 @@
+     } else if (widget.kind === 6) {
+       entry.rows.style.height = `${widget.records.length * widget.rowHeight}px`;
+       entry.rows.style.width = `${Math.max(width - 2, widget.contentSize[0])}px`;
+-      const signature = JSON.stringify([widget.records, widget.rowHeight, widget.selected, widget.enabled]);
++      const signature = JSON.stringify([widget.records, widget.rowHeight, widget.selected, widget.enabled, widget.placeholder]);
+       if (signature !== entry.signature) {
+-        entry.rows.replaceChildren();
+-        if (!widget.records.length) {const placeholder = this.element("div", "empty", entry.rows); placeholder.textContent = widget.placeholder;}
++        entry.recordRows ??= new Map();
++        const retained = new Set(widget.records.map(record => record.id));
++        for (const [id, row] of entry.recordRows) if (!retained.has(id)) {
++          row.node.remove(); entry.recordRows.delete(id);
++        }
++        if (!widget.records.length) {
++          entry.placeholder ??= this.element("div", "empty", entry.rows);
++          entry.placeholder.textContent = widget.placeholder;
++        } else { entry.placeholder?.remove(); entry.placeholder = null; }
+         widget.records.forEach((record,index) => {
+-          const row = this.element("div", "record", entry.rows); row.style.top = `${index * widget.rowHeight}px`; row.style.height = `${widget.rowHeight}px`;
+-          row.setAttribute("role", "option"); row.setAttribute("aria-label", record.text); row.setAttribute("aria-selected", String(record.id === widget.selected));
+-          row.setAttribute("aria-disabled", String(!record.enabled));
+-          row.addEventListener("click", () => this.operation(entry.widget, "select", {id: record.id}));
+-          row.addEventListener("dblclick", () => this.operation(entry.widget, "activateRecord", {id: record.id}));
+-          for (const cell of record.cells) {
+-            const text = this.element("span", "cell", row); text.textContent = cell.text;
++          let row = entry.recordRows.get(record.id);
++          if (!row) {
++            row = {node: this.element("div", "record", entry.rows), cells: []};
++            entry.recordRows.set(record.id, row);
++            for (const [event, type] of [["click", "select"], ["dblclick", "activateRecord"]])
++              row.node.addEventListener(event, () => {
++                if (this.nodes.get(identity(entry.widget.key)) === entry && entry.recordRows.get(record.id) === row)
++                  this.operation(entry.widget, type, {id: record.id});
++              });
++          }
++          const node = row.node;
++          if (entry.rows.children[index] !== node) entry.rows.insertBefore(node, entry.rows.children[index] || null);
++          node.style.top = `${index * widget.rowHeight}px`; node.style.height = `${widget.rowHeight}px`;
++          node.setAttribute("role", "option"); node.setAttribute("aria-label", record.text);
++          node.setAttribute("aria-selected", String(record.id === widget.selected));
++          node.setAttribute("aria-disabled", String(!record.enabled));
++          while (row.cells.length > record.cells.length) row.cells.pop().remove();
++          record.cells.forEach((cell, column) => {
++            const text = row.cells[column] ?? (row.cells[column] = this.element("span", "cell", node));
++            text.textContent = cell.text;
+             const [left,top,w,h] = cell.bounds;
+             Object.assign(text.style, {left:`${left}px`,top:`${top}px`,width:`${w}px`,height:`${h}px`,whiteSpace:cell.wrap?"pre-wrap":"pre"});
+             this.setFont(text, cell.font);
+-          }
++          });
+         });
+         entry.signature = signature;
+       }
+@@ -427,11 +450,13 @@
+     this.syncFocus();
+     if(snapshot.closed){this.cancelPointers();this.root.setAttribute("inert","");for(const dialog of this.document.querySelectorAll?.('.service-prompt')||[])dialog.close();}
+     this.renderPopup(snapshot.popup);
+-    this.measure(snapshot.measurements);
++    this.measure(snapshot.closed ? [] : snapshot.measurements);
+   }
+   syncFocus(){
+-    if(this.pendingFocus||!this.snapshot)return;
+-    const focus=this.snapshot.focus?identity(this.snapshot.focus):null;
++    const snapshot=this.acceptedSnapshot || this.snapshot;
++    if(this.pendingFocus||!snapshot)return;
++    const focus=snapshot.focus?identity(snapshot.focus):null;
++    if(focus&&!this.nodes.has(focus))return; // Defer focus until its retained control is painted.
+     if(focus!==this.lastFocus){const entry=this.nodes.get(focus);if(entry){entry.updating=true;entry.control.focus({preventScroll:true});entry.updating=false;}
+       else if(this.lastFocus)this.document.activeElement?.blur?.();this.lastFocus=focus;}
+   }
+@@ -448,16 +473,58 @@
+     const first=container.children[0];first?.focus();
+   }
+   measure(requests) {
+-    const results=[];
+-    for(const {id,request} of requests) {
+-      if(this.measurements.has(id))continue;this.measurements.add(id);
+-      const span=this.element("span","measure",this.document.body);this.setFont(span,request.font);
+-      span.textContent=request.text || "\u200b";
+-      span.style.whiteSpace=request.wrap?"pre-wrap":"pre";
+-      if(request.wrap)span.style.width=`${request.width}px`;
+-      const rect=span.getBoundingClientRect();results.push({id,width:request.text?rect.width:0,height:rect.height});span.remove();
+-    }
+-    if(results.length)this.send({type:"measure",values:results}).catch(()=>{});
++    if (this.destroyed) return;
++    // IDs belong to the current backend request set, not the document lifetime.
++    this.measureRequests = new Map(requests.map(value => [value.id, value.request]));
++    this.measureAttempts.clear();
++    for (const id of this.measurements) if (!this.measureRequests.has(id)) this.measurements.delete(id);
++    if (!requests.length) { this.stopMeasuring(); return; }
++    if (this.measureTimer === null) this.measureBatch();
++  }
++  stopMeasuring() {
++    if (this.measureTimer !== null) {
++      const view = this.document.defaultView || globalThis;
++      if (view.requestAnimationFrame) view.cancelAnimationFrame(this.measureTimer);
++      else view.clearTimeout(this.measureTimer);
++      this.measureTimer = null;
++    }
++    this.measureProbe?.remove(); this.measureProbe = null;
++  }
++  measureBatch() {
++    this.measureTimer = null;
++    if (this.destroyed) return;
++    const view = this.document.defaultView || globalThis;
++    const now = () => (view.performance || globalThis.performance).now();
++    const started = now(), results = [];
++    let count = 0;
++    for (const [id, request] of this.measureRequests) {
++      if (this.measurements.has(id) || this.measureAttempts.has(id)) continue;
++      // Always make progress, but bound both cheap and expensive layout probes.
++      if (count && (count >= 64 || now() - started >= 4)) break;
++      ++count; this.measureAttempts.add(id);
++      const span = this.measureProbe ?? (this.measureProbe = this.element("span", "measure", this.document.body));
++      this.setFont(span, request.font); span.textContent = request.text || "\u200b";
++      span.style.whiteSpace = request.wrap ? "pre-wrap" : "pre";
++      span.style.width = request.wrap ? `${request.width}px` : "";
++      const rect = span.getBoundingClientRect();
++      // Hidden documents can report no geometry; retry on a later presentation.
++      if (!(rect.height > 0) || !Number.isFinite(rect.width) || !Number.isFinite(rect.height)) continue;
++      this.measurements.add(id);
++      results.push({id, width:request.text ? rect.width : 0, height:rect.height});
++    }
++    if (results.length) this.send({type:"measure", values:results}).catch(() => {
++      for (const value of results) this.measurements.delete(value.id);
++    });
++    // Do not spin on hidden/invalid probes or rejected sends in this turn.
++    if ([...this.measureRequests.keys()].some(id => !this.measurements.has(id) && !this.measureAttempts.has(id))) {
++      const run = () => this.measureBatch();
++      this.measureTimer = view.requestAnimationFrame ? view.requestAnimationFrame(run) : view.setTimeout(run, 0);
++    }
++  }
++  destroy() {
++    if (this.destroyed) return;
++    this.destroyed = true; this.stopMeasuring(); this.measureRequests.clear(); this.measureAttempts.clear(); this.measurements.clear();
++    this.cancelPointers();
+   }
+   groupWheel(event) {
+     if(event.defaultPrevented||!this.snapshot)return;

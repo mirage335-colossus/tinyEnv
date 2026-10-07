@@ -1,0 +1,145 @@
+{
+  "title": "Software Foundation · capabilities",
+  "fps": 20,
+  "scenes": [
+    {
+      "id": "01-capabilities",
+      "kind": "title",
+      "title": "Two weeks of work, ready to reuse",
+      "sentences": [
+        "Software Foundation is intended to turn roughly two weeks of repeated project development into a few hours, potentially as little as one hour.",
+        "Developers and AI agents can concentrate on important project-specific work, with GUI, processing, test, build, and delivery connections already established."
+      ],
+      "eyebrow": "SOFTWARE FOUNDATION / REUSABLE DEVELOPMENT",
+      "lines": [
+        "~2 weeks → a few hours → potentially 1 hour",
+        "Developers + AI agents: focus on the important work",
+        "Reusable development across future projects"
+      ]
+    },
+    {
+      "id": "01b-interface-backends",
+      "kind": "native",
+      "title": "One application across GUI backends and the TUI",
+      "eyebrow": "SHARED GUI ABSTRACTION / SEVEN APPLICATION HOSTS",
+      "native": ".work/gallery/backend-comparison.mp4",
+      "minimum": 44,
+      "sentences": [
+        "One shared application and layout runs through seven GUI and terminal hosts. These are actual screenshots of the same example.",
+        "An insulating GUI abstraction keeps application state, behavior, and layout separate from toolkit details. Backend adapters handle rendering, input, and platform services through a common contract.",
+        "The hosted browser and WebAssembly versions share their visual renderer, while using different execution paths.",
+        "That same boundary reaches the terminal T U I. Application features can carry across supported backends without a separate implementation for each interface."
+      ],
+      "cue_times": [
+        0.28,
+        9.36,
+        22.68,
+        33.2
+      ]
+    },
+    {
+      "id": "02-visual-code",
+      "kind": "native",
+      "title": "An optional visual frontend for ordinary code",
+      "sentences": [
+        "The optional editor gives ordinary C, C plus plus, and Rust an event-driven visual frontend. Place widgets, connect events, and open their source.",
+        "Ask an AI agent to follow the editor’s project and binding interfaces when you want compatible visual editing.",
+        "You can also ignore the editor entirely and use ordinary source tools. Your algorithms remain ordinary functions."
+      ],
+      "eyebrow": "VISUAL INTERFACES / ORDINARY SOURCE",
+      "native": ".work/capture/form-widget.mp4",
+      "callouts": [
+        "Use visual editing when helpful",
+        "Ask AI agents to follow its interfaces",
+        "Or work entirely in ordinary source"
+      ]
+    },
+    {
+      "id": "03-processing",
+      "kind": "native",
+      "title": "Continuous processing becomes visible",
+      "sentences": [
+        "Visual flows connect multiple inputs and outputs, with typed ports, independent rates, and bounded queues.",
+        "The examples include signal processing and a stateful Rust filter.",
+        "The same structure can connect computer-vision or other processing algorithms while making their data paths visible."
+      ],
+      "eyebrow": "MULTIPLE INPUTS / MULTIPLE OUTPUTS",
+      "native": ".work/capture/mimo-flow.mp4",
+      "trim_start": 4,
+      "minimum": 24,
+      "callouts": [
+        "Trace the path of the data",
+        "Open the function behind a block",
+        "Reuse the runtime and checks"
+      ]
+    },
+    {
+      "id": "04-foundations",
+      "kind": "card",
+      "title": "Keep developing when services are unavailable",
+      "sentences": [
+        "Retained SDKs, dependencies, source records, and regression tests address recurring development needs.",
+        "If frontier AI providers are unavailable, developers can keep working locally with the example, optional editor, documentation, and prepared toolchains.",
+        "The graphical HTML explorer and matching PDFs help people find the code to change."
+      ],
+      "eyebrow": "CONTINUED LOCAL DEVELOPMENT / PREPARED TOOLS AND DOCUMENTATION",
+      "lines": [
+        "Ordinary C / C++ / Rust source",
+        "Optional editor for forms, events and flows",
+        "Local HTML explorer + corresponding PDFs",
+        "Retained SDKs and dependency inputs",
+        "Regression checks + shared GUI hosts",
+        "Keep working during frontier LLM service downtime"
+      ]
+    },
+    {
+      "id": "05-latest-distribution",
+      "kind": "delivery",
+      "title": "GitHub Latest becomes a distro package repository",
+      "sentences": [
+        "One distinctive connection is distribution. CI formats the project’s GitHub Latest release with native packages and signed package-manager indexes.",
+        "A P T and pacman connect directly to that Latest release. The user’s operating system discovers updates and fetches the CI-built packages straight from GitHub.",
+        "Gentoo follows the same release through its verified sync adapter. There is no independent software-repository server to maintain; the project’s CI takes care of the package publication."
+      ],
+      "eyebrow": "GITHUB ACTIONS → LATEST RELEASE → OS UPDATES",
+      "steps": [
+        {
+          "label": "Project CI",
+          "detail": "Build and sign packages + indexes"
+        },
+        {
+          "label": "GitHub Latest",
+          "path": "releases/latest/download/",
+          "detail": "The package repository endpoint"
+        },
+        {
+          "label": "User’s distribution",
+          "detail": "Normal package-manager updates"
+        }
+      ],
+      "package_managers": [
+        "APT",
+        "pacman",
+        "Portage adapter"
+      ],
+      "note": "Release hosting and package distribution use the same CI-published assets."
+    },
+    {
+      "id": "06-many-projects",
+      "kind": "title",
+      "title": "Carry this work into project after project",
+      "sentences": [
+        "This example reflects work by members of the development team and demonstrates one part of their capabilities.",
+        "These tested practices are ready to carry into future projects.",
+        "Reusing the foundation can turn weeks of repeated work into hours of focused development, while people and AI agents concentrate on what makes each project valuable."
+      ],
+      "eyebrow": "ONE EXAMPLE OF THE TEAM’S WORK / REUSABLE ACROSS FUTURE PROJECTS",
+      "lines": [
+        "A few hours, potentially one, through reuse",
+        "One example of broader development capabilities",
+        "Developers and AI agents focus on the project"
+      ],
+      "subtitle": "github.com/mirage335-colossus/software-foundation"
+    }
+  ]
+}

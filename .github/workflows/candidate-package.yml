@@ -1,0 +1,105 @@
+name: Independent native package consumer
+'on':
+  workflow_call:
+    inputs:
+      core_provider:
+        type: string
+        default: rust
+      preserve_artifacts:
+        type: boolean
+        default: false
+      target:
+        type: string
+        required: true
+      runner:
+        type: string
+        required: true
+      build_jobs:
+        type: string
+        default: auto
+permissions:
+  contents: read
+env:
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+  GH_TOKEN: ${{ github.token }}
+jobs:
+  package:
+    runs-on: ${{ inputs.runner }}
+    name: Independent package ${{ inputs.target }}
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - if: runner.os == 'Windows'
+      shell: pwsh
+      run: ./tools/ci_windows.ps1
+    - name: Explicit pinned native Rust host preparation
+      if: inputs.core_provider == 'rust'
+      shell: python
+      env:
+        TARGET: ${{ inputs.target }}
+      run: |
+        import os, subprocess, sys
+        subprocess.run([sys.executable, '-B', '.github/scripts/rust_host_prepare.py',
+                        '--target', os.environ['TARGET']], check=True)
+    - env:
+        JOBS: ${{ inputs.build_jobs }}
+        TARGET: ${{ inputs.target }}
+        CORE_PROVIDER: ${{ inputs.core_provider }}
+      shell: python
+      run: |
+        import os, subprocess, sys
+        subprocess.run([sys.executable, 'tools/ci_plan.py', 'host', os.environ['TARGET']], check=True)
+        command = [sys.executable, 'tools/ci_plan.py', 'package', '--build', 'build/package',
+                   '--jobs', os.environ['JOBS'], '--core-provider', os.environ['CORE_PROVIDER']]
+        if os.environ['CORE_PROVIDER'] == 'rust': command += ['--rust-sdk', 'build/native-rust-sdk']
+        subprocess.run(command, check=True)
+    - id: package_bundle
+      name: Retain verified package-${{ inputs.target }}-${{ github.run_attempt }}
+      uses: ./.github/actions/ci-evidence-publish
+      with:
+        name: package-${{ inputs.target }}-${{ github.run_attempt }}
+        paths: |
+          build/package/packages/*.tar.gz
+          build/package/packages/*.zip
+          build/package/packages/*.json
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      artifact_id: ${{ steps.package_bundle.outputs.artifact-id }}
+  copied:
+    permissions:
+      contents: read
+      actions: write
+    needs: package
+    runs-on: ${{ inputs.runner }}
+    name: Fresh copied archive ${{ inputs.target }}
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Download the exact successful package producer
+      uses: ./.github/actions/ci-evidence-download
+      with:
+        pattern: package-${{ inputs.target }}
+    - env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        BUNDLE_NAME: package-${{ inputs.target }}-${{ github.run_attempt }}
+        BUNDLE_OUTPUT: build/copied
+      shell: python
+      run: |
+        import subprocess,sys
+        subprocess.run([sys.executable,'.github/scripts/lifecycle.py','bundle-fetch'],check=True)
+        subprocess.run([sys.executable,'tools/ci_plan.py','check-archives','build/copied','--runtime-only'],check=True)
+    - name: Remove the consumed regression package
+      if: success() && !inputs.preserve_artifacts
+      uses: ./.github/actions/ci-artifact-cleanup
+      continue-on-error: true
+      timeout-minutes: 1
+      with:
+        artifact-ids: '[${{ toJSON(needs.package.outputs.artifact_id) }}]'

@@ -1,0 +1,15 @@
+--- renderer-responsive.mjs
++++ renderer.mjs
+@@ -1,3 +1,4 @@
++import {executeFileService} from './file_services.mjs';
+ // Generic DOM mechanics for the shared boundary. Application state, widget
+ // eligibility, layout, stable IDs and edit validation remain in C++.
+ export const identity = key => JSON.stringify([key.id, key.generation]);
+@@ -540,6 +541,7 @@
+ 
+ export async function executeService(service, host = globalThis) {
+   const base={type:"service",id:service.id,value:"",error:""};
++  if(service.kind===5||service.kind===6)return executeFileService(service,host);
+   if(service.kind!==2)return {...base,status:"error",error:"This browser profile supports prompts only; file paths and external host services are unsupported."};
+   const document=host.document;
+   if(!document)return {...base,status:"error",error:"This host has no DOM dialog support."};

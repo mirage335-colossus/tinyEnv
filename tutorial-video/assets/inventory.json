@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "files": [
+    {
+      "path": "fonts/COPYRIGHT.txt",
+      "bytes": 3859,
+      "sha256": "63d3ba759d12804c5b31a9d5940d855c1820d1f5999e6b0872eb1c7ff045fbc9"
+    },
+    {
+      "path": "fonts/DejaVuSans-Bold.ttf",
+      "bytes": 708920,
+      "sha256": "a4c5bc453ca281d90ea079e596da7ae0dfeb5777497c29ec254e76d97ff6f890"
+    },
+    {
+      "path": "fonts/DejaVuSans.ttf",
+      "bytes": 759720,
+      "sha256": "57f73e11f51999432bf7ab22ce55b6f945d5eca1bf824404cfa9ec2e3718c84e"
+    },
+    {
+      "path": "fonts/DejaVuSansMono-Bold.ttf",
+      "bytes": 334268,
+      "sha256": "0d3c03d1b667192f91223660a3163325cf83132662fe4d9f7d6e596bf7a995c2"
+    },
+    {
+      "path": "fonts/DejaVuSansMono.ttf",
+      "bytes": 343140,
+      "sha256": "54bf827eb99404e8f430c330ad30f063334f637eba0109b6a18d4f566a8e9dd8"
+    },
+    {
+      "path": "fonts/LICENSE.txt",
+      "bytes": 4781,
+      "sha256": "d04f23bc5d4ee3f9e2fe5a113e94f479fcb65bac5503a9c3baf7d248744b6a92"
+    },
+    {
+      "path": "fonts/PROVENANCE.md",
+      "bytes": 574,
+      "sha256": "21a610af855fee0ee745980007af619b789072244b7ea9a32ec5f7775fc05032"
+    },
+    {
+      "path": "voices/LICENSE-MIT.txt",
+      "bytes": 1071,
+      "sha256": "4cd71dece7037f1d6d93cce7570c57ab75ea9ac566fd4990be2f3ab08d15b47f"
+    },
+    {
+      "path": "voices/MODEL_CARD",
+      "bytes": 518,
+      "sha256": "a94a112bb5b599b41da2e5b7a7161ced550e56259a40b2985689ab95faaff064"
+    },
+    {
+      "path": "voices/PROVENANCE.md",
+      "bytes": 1934,
+      "sha256": "bf376e354eb10e6ad381df4e084ff42f8d73d99c5f6460a18fd71ce2bb52d40b"
+    },
+    {
+      "path": "voices/en_US-ljspeech-medium.onnx",
+      "bytes": 63531379,
+      "sha256": "6f52a751e2349abe7a76735eb09dc1875298c77ea2342ffd2fef79ff81b87f22"
+    },
+    {
+      "path": "voices/en_US-ljspeech-medium.onnx.json",
+      "bytes": 4972,
+      "sha256": "141d612cc0a95ed7efc1ca936b845c2364967f2e9217c5dbfcf69fc4d6c65860"
+    }
+  ]
+}

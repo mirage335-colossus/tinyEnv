@@ -1,0 +1,159 @@
+--- backends/framebuffer/main_sdl.cpp
++++ sdl_runner.hpp
+@@ -1,4 +1,7 @@
+-#include "host.hpp"
++#include "host/native_session.hpp"
++#include "host/framebuffer_touch.hpp"
++#include "host/event_budget.hpp"
++#include <gui/framebuffer.hpp>
+ #include <SDL.h>
+ #include <cstring>
+ #include <iostream>
+@@ -54,11 +57,16 @@
+     require(SDL_SetClipboardText(value.c_str())==0,"Clipboard write failed");
+     if(key==SDLK_x)adapter.text("");
+ }
+-void event(framebuffer_example::Session& session,SDL_Window* window,SDL_Renderer* renderer,const SDL_Event& event) {
++template<class Session> void event(Session& session,SDL_Window* window,SDL_Renderer* renderer,foundation::host::FramebufferTouch& pointer,const SDL_Event& event) {
+     auto& adapter=session.adapter;
++    using Contact=foundation::host::Contact;using Phase=foundation::host::ContactPhase;
++    const Contact mouse{Contact::Source::mouse,0,0};
+     if(event.type==SDL_QUIT)adapter.key(gui::Key::quit);
+     else if(event.type==SDL_WINDOWEVENT&&event.window.event==SDL_WINDOWEVENT_CLOSE)adapter.key(gui::Key::quit);
+-    else if(event.type==SDL_WINDOWEVENT&&event.window.event==SDL_WINDOWEVENT_SIZE_CHANGED) {
++    else if(event.type==SDL_WINDOWEVENT&&event.window.event==SDL_WINDOWEVENT_FOCUS_LOST) {
++        pointer.cancel(adapter);SDL_CaptureMouse(SDL_FALSE);
++    } else if(event.type==SDL_WINDOWEVENT&&event.window.event==SDL_WINDOWEVENT_SIZE_CHANGED) {
++        pointer.cancel(adapter);SDL_CaptureMouse(SDL_FALSE);
+         int width=0,height=0,physical_width=0,physical_height=0;
+         SDL_GetWindowSize(window,&width,&height);require(SDL_GetRendererOutputSize(renderer,&physical_width,&physical_height)==0,"Cannot query renderer size");
+         (void)physical_height;
+@@ -70,55 +78,48 @@
+         const auto symbol=event.key.keysym.sym;
+         if((mods&KMOD_CTRL)!=0&&(symbol==SDLK_c||symbol==SDLK_v||symbol==SDLK_x))clipboard(adapter,symbol);
+         else if(const auto translated=translate(symbol,mods))adapter.key(*translated,(mods&KMOD_CTRL)!=0,(mods&KMOD_SHIFT)!=0,(mods&KMOD_ALT)!=0);
+-    } else if(event.type==SDL_MOUSEBUTTONDOWN) {
++    } else if(event.type==SDL_FINGERDOWN||event.type==SDL_FINGERMOTION||event.type==SDL_FINGERUP) {
++        const auto& view=adapter.snapshot();
++        const Contact contact{Contact::Source::touch,static_cast<std::uint64_t>(event.tfinger.touchId),static_cast<std::uint64_t>(event.tfinger.fingerId)};
++        pointer.input(adapter,contact,event.type==SDL_FINGERDOWN?Phase::press:event.type==SDL_FINGERUP?Phase::release:Phase::move,
++            {event.tfinger.x*view.client_size.width,event.tfinger.y*view.client_size.height});
++    } else if((event.type==SDL_MOUSEBUTTONDOWN||event.type==SDL_MOUSEBUTTONUP)&&event.button.which!=SDL_TOUCH_MOUSEID) {
+         const gui::Point point{double(event.button.x),double(event.button.y)};
+-        if(event.button.button==SDL_BUTTON_RIGHT)adapter.context_menu(point);
++        if(event.button.button==SDL_BUTTON_RIGHT&&event.type==SDL_MOUSEBUTTONDOWN&&!pointer.active())adapter.context_menu(point);
+         else if(event.button.button==SDL_BUTTON_LEFT) {
+             const auto mods=SDL_GetModState();
+-            adapter.pointer({event.button.clicks>1?gui::PointerKind::double_click:gui::PointerKind::click,point,0,0,
+-                (mods&KMOD_CTRL)!=0,(mods&KMOD_SHIFT)!=0,(mods&KMOD_ALT)!=0});
++            const bool down=event.type==SDL_MOUSEBUTTONDOWN;
++            const bool accepted=pointer.input(adapter,mouse,down?Phase::press:Phase::release,point,
++                (mods&KMOD_CTRL)!=0,(mods&KMOD_SHIFT)!=0,(mods&KMOD_ALT)!=0,event.button.clicks>1?2u:1u);
++            if(accepted) {
++                if(SDL_CaptureMouse(down?SDL_TRUE:SDL_FALSE)!=0&&down)pointer.cancel(adapter);
++            }
+         }
+-    } else if(event.type==SDL_MOUSEMOTION) {
+-        adapter.pointer({gui::PointerKind::move,{double(event.motion.x),double(event.motion.y)}});
+-    } else if(event.type==SDL_MOUSEWHEEL) {
++    } else if(event.type==SDL_MOUSEMOTION&&event.motion.which!=SDL_TOUCH_MOUSEID) {
++        const gui::Point point{double(event.motion.x),double(event.motion.y)};
++        if(pointer.active())pointer.input(adapter,mouse,Phase::move,point);
++        else adapter.pointer({gui::PointerKind::move,point});
++    } else if(event.type==SDL_MOUSEWHEEL&&event.wheel.which!=SDL_TOUCH_MOUSEID&&!pointer.active()) {
+         int x=0,y=0;SDL_GetMouseState(&x,&y);
+         const double direction=event.wheel.direction==SDL_MOUSEWHEEL_FLIPPED?-1:1;
+         adapter.pointer({gui::PointerKind::wheel,{double(x),double(y)},event.wheel.x*direction,event.wheel.y*direction});
+     }
+     session.tick();
+ }
+-void push_key(SDL_Keycode key,SDL_Keymod mods=KMOD_NONE) {
+-    SDL_Event event{};event.type=SDL_KEYDOWN;event.key.keysym.sym=key;event.key.keysym.mod=mods;
+-    require(SDL_PushEvent(&event)==1,"Cannot inject SDL key");
++struct Passive {
++    static constexpr bool testing = false;
++    template<class Session> void start(Session&) {}
++    template<class Session> void frame(Session&, SDL_Window*, const gui::Frame&) {}
++};
+ }
+-void push_text(const char* text) {
+-    SDL_Event event{};event.type=SDL_TEXTINPUT;SDL_strlcpy(event.text.text,text,sizeof(event.text.text));
+-    require(SDL_PushEvent(&event)==1,"Cannot inject SDL text");
+-}
+-void push_click(gui::Rect area) {
+-    const auto point=framebuffer_example::center(area);SDL_Event event{};event.type=SDL_MOUSEBUTTONDOWN;
+-    event.button.button=SDL_BUTTON_LEFT;event.button.clicks=1;event.button.x=int(point.x);event.button.y=int(point.y);
+-    require(SDL_PushEvent(&event)==1,"Cannot inject SDL pointer");
+-}
+-void inject_smoke(framebuffer_example::Session& session) {
+-    const auto& view=session.adapter.snapshot();
+-    push_click(framebuffer_example::first(view,gui::Kind::text).state.bounds);
+-    push_key(SDLK_a,KMOD_CTRL);push_text("SDL input");push_key(SDLK_RETURN);
+-    push_text("SDL prompt");push_key(SDLK_RETURN);
+-    push_click(framebuffer_example::first(view,gui::Kind::toggle).state.bounds);
+-    push_click(framebuffer_example::first(view,gui::Kind::button).state.bounds);
+-}
+-}
+-int main(int argc,char** argv) {
++namespace foundation::host {
++template<Application App, class Observer = Passive>
++int run_sdl(int argc, char**, Observer observer = {}) {
++
+     try {
+-        bool self_test=false;std::string output;
+-        for(int i=1;i<argc;++i) {
+-            const std::string arg=argv[i];
+-            if(arg=="--self-test")self_test=true;
+-            else if(arg=="--output"&&i+1<argc)output=argv[++i];
+-            else throw std::invalid_argument("Usage: gui_sdl [--self-test] [--output image.ppm]");
+-        }
+-        Sdl sdl;framebuffer_example::Session session;
++        if (argc != 1) throw std::invalid_argument("This host accepts no arguments");
++        constexpr bool self_test = Observer::testing;
++        Sdl sdl; NativeSession<App, gui::FramebufferAdapter> session;
+         const auto initial=session.adapter.frame();
+         Window window(SDL_CreateWindow(session.adapter.snapshot().title.c_str(),SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,
+             int(initial.width),int(initial.height),SDL_WINDOW_RESIZABLE|SDL_WINDOW_ALLOW_HIGHDPI|(self_test?SDL_WINDOW_HIDDEN:0)),SDL_DestroyWindow);
+@@ -127,13 +128,14 @@
+         require(bool(renderer),"Renderer creation failed");
+         Texture texture(nullptr,SDL_DestroyTexture);unsigned texture_width=0,texture_height=0;std::uint64_t displayed=0;
+         SDL_StartTextInput();
+-        if(self_test)inject_smoke(session);
+-        bool verified=false,resized=false;
++        foundation::host::FramebufferTouch pointer;
++        observer.start(session);
+         while(!session.adapter.closed()) {
+             SDL_Event input{};
+             if(SDL_WaitEventTimeout(&input,16)) {
+-                event(session,window.get(),renderer.get(),input);
+-                while(!session.adapter.closed()&&SDL_PollEvent(&input))event(session,window.get(),renderer.get(),input);
++                event(session,window.get(),renderer.get(),pointer,input);
++                foundation::host::EventBudget budget;
++                while(!session.adapter.closed()&&budget.take()&&SDL_PollEvent(&input))event(session,window.get(),renderer.get(),pointer,input);
+             }
+             session.tick();if(session.adapter.closed())break;
+             const auto frame=session.adapter.frame(displayed);
+@@ -150,20 +152,10 @@
+             }
+             require(SDL_RenderClear(renderer.get())==0,"Renderer clear failed");
+             require(SDL_RenderCopy(renderer.get(),texture.get(),nullptr,nullptr)==0,"Frame presentation failed");SDL_RenderPresent(renderer.get());displayed=frame.revision;
+-            if(self_test&&!verified) {
+-                if(framebuffer_example::first(session.adapter.snapshot(),gui::Kind::list).state.records.size()!=1||session.adapter.prompt()||
+-                    framebuffer_example::first(session.adapter.snapshot(),gui::Kind::text).state.text!="SDL input")
+-                    throw std::runtime_error("Injected SDL input failed to update the shared application");
+-                verified=true;SDL_SetWindowSize(window.get(),800,600);
+-                SDL_Event resize{};resize.type=SDL_WINDOWEVENT;resize.window.event=SDL_WINDOWEVENT_SIZE_CHANGED;
+-                require(SDL_PushEvent(&resize)==1,"Cannot inject SDL resize");
+-            } else if(self_test&&verified&&!resized) {
+-                if(frame.width!=800||frame.height!=600)throw std::runtime_error("SDL resize did not rebuild complete frame");
+-                if(!output.empty())framebuffer_example::write_ppm(frame,output);
+-                resized=true;SDL_Event quit{};quit.type=SDL_QUIT;require(SDL_PushEvent(&quit)==1,"Cannot inject SDL close");
+-            }
++            observer.frame(session, window.get(), frame);
+         }
+         SDL_StopTextInput();
+-        if(self_test) {if(!verified||!resized)throw std::runtime_error("SDL self-test closed too early");std::cout<<"SDL window, input, prompt, resize, texture upload and close passed\n";}
+     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
++    return 0;
+ }
++}

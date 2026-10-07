@@ -1,0 +1,54 @@
+--- a/backends/fltk/adapter.hpp
++++ b/backends/fltk/adapter.hpp
+@@ -185,7 +185,7 @@
+             fl_pop_clip();
+         }
+         int handle(int event) override {
+-            if(event==FL_FOCUS)owner_.RetainedAdapter::focus(key_);
++            if(event==FL_FOCUS&&!owner_.service_)owner_.RetainedAdapter::focus(key_);
+             const auto* widget=find_widget(owner_.snapshot(),key_);if(!widget)return 0;
+             const auto policy=widget->spec.text_policy;
+             if(event==FL_KEYDOWN && Fl::event_key()==FL_Enter) {
+@@ -217,7 +217,7 @@
+             if(choice) {fl_color(Adapter::color(enabled?p.border:p.muted));fl_line(x()+w()-9,y()+h()/2-5,x()+w()-4,y()+h()/2,x()+w()-9,y()+h()/2+5);}
+         }
+         int handle(int event) override {
+-            if(event==FL_FOCUS)owner_.RetainedAdapter::focus(key_);
++            if(event==FL_FOCUS&&!owner_.service_)owner_.RetainedAdapter::focus(key_);
+             if(event!=FL_PUSH && event!=FL_KEYDOWN)return Fl_Choice::handle(event);
+             owner_.safely([&]{owner_.policy().open_popup(key_);});
+             opening=true;
+@@ -233,7 +233,7 @@
+         Canvas(Adapter& owner,WidgetKey key) : Fl_Widget(0,0,0,0),owner_(owner),key_(std::move(key)) {}
+         void draw() override {owner_.safely([&]{owner_.draw_canvas(*this,key_);});}
+         int handle(int event) override {
+-            if(event==FL_FOCUS) {owner_.RetainedAdapter::focus(key_);return 1;}
++            if(event==FL_FOCUS) {if(!owner_.service_)owner_.RetainedAdapter::focus(key_);return 1;}
+             if(event==FL_PUSH) {take_focus();owner_.safely([&]{owner_.click_canvas(key_);});return 1;}
+             if(event==FL_MOUSEWHEEL) {owner_.safely([&]{owner_.wheel(key_);});return 1;}
+             if(event==FL_KEYDOWN) {
+@@ -649,14 +649,20 @@
+             page->button->color(color(tab->selected?palette.selection:palette.surface));page->button->labelcolor(color(palette.text));
+             window_->remove(page->button);window_->add(page->button);
+         }
+-        if(const auto key=focused();key) {if(auto* native=native_widget(*key);native&&Fl::focus()!=native)native->take_focus();}
+-        else if(Fl::focus()&&window_->contains(Fl::focus()))Fl::focus(nullptr);
++        // A native prompt owns keyboard/clipboard focus until its completion.
++        // Keep retained main-window focus current and restore it afterward.
++        if(!service_) {
++            if(const auto key=focused();key) {if(auto* native=native_widget(*key);native&&Fl::focus()!=native)native->take_focus();}
++            else if(Fl::focus()&&window_->contains(Fl::focus()))Fl::focus(nullptr);
++        }
+         window_->redraw();
+     }
+     bool focus(std::optional<WidgetKey> key) override {
+         if(!RetainedAdapter::focus(key))return false;
+-        if(key) { if(auto* native=native_widget(*key))native->take_focus(); }
+-        else if(Fl::focus()&&window_->contains(Fl::focus()))Fl::focus(nullptr);
++        if(!service_) {
++            if(key) { if(auto* native=native_widget(*key))native->take_focus(); }
++            else if(Fl::focus()&&window_->contains(Fl::focus()))Fl::focus(nullptr);
++        }
+         window_->redraw();
+         return true;
+     }

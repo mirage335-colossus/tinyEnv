@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "toolset": "v143",
+  "architecture": "x64",
+  "windows_sdk": "10.0.22621.0",
+  "runtime": "static",
+  "link_time_optimization": false,
+  "host_prerequisites": "Separately installed Microsoft Build Tools and Windows SDK; retain a complete offline installer layout for disconnected bootstrap."
+}

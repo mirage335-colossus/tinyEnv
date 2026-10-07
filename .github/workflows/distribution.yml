@@ -1,0 +1,134 @@
+name: Signed immutable package channel
+'on':
+  workflow_dispatch:
+    inputs:
+      request:
+        description: Complete distribution request JSON; see docs/distribution-release.md
+        type: string
+        required: true
+      previous:
+        description: Optional prior exact channel JSON for native upgrade qualification
+        type: string
+        default: ''
+      execute:
+        description: Sign and publish the separately certified package channel
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: foundation-distribution-${{ fromJSON(inputs.request).target }}
+  cancel-in-progress: false
+env:
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+  GH_TOKEN: ${{ github.token }}
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - id: plan
+      name: Validate exact request without signing or remote mutation
+      shell: python
+      env:
+        REQUEST: ${{ inputs.request }}
+      run: |
+        import json, os, sys
+        from pathlib import Path
+        sys.path.insert(0, 'tools')
+        import distribution_release as channel
+        raw = os.environ['REQUEST']
+        request = channel.workflow_request(raw)
+        if request.get('repository') != os.environ['GITHUB_REPOSITORY'] or request.get('packager_commit') != os.environ['GITHUB_SHA']:
+            raise ValueError('request must name this repository and exact packaging revision')
+        result = channel.plan(request)
+        with Path(os.environ['GITHUB_OUTPUT']).open('a') as stream:
+            stream.write('tag=' + result['tag'] + '\n')
+        with Path(os.environ['GITHUB_STEP_SUMMARY']).open('a') as stream:
+            stream.write('Planned independent non-Latest package channel:\n```json\n' + json.dumps(result, indent=2) + '\n```\n')
+  publish:
+    outputs:
+      channel: ${{ steps.publish.outputs.channel }}
+    if: ${{ inputs.execute }}
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    environment: release-publisher
+    permissions:
+      contents: write
+      actions: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - name: Install ordinary package and signing tools
+      run: sudo sh tools/ci-apt.sh install dpkg-dev gnupg gpgv binutils
+    - name: Verify existing certificate, sign, read back and publish independent channel
+      id: publish
+      shell: python
+      env:
+        REQUEST: ${{ inputs.request }}
+        SIGNING_PRIVATE_KEY: ${{ secrets.DISTRIBUTION_SIGNING_KEY }}
+        TRUSTED_FINGERPRINT: ${{ vars.DISTRIBUTION_SIGNING_FINGERPRINT }}
+      run: |
+        import json, os, subprocess, sys, tempfile
+        from pathlib import Path
+        sys.path.insert(0, 'tools')
+        import distribution_release as channel
+        raw = os.environ['REQUEST']
+        request = channel.workflow_request(raw)
+        if request['repository'] != os.environ['GITHUB_REPOSITORY'] or request['packager_commit'] != os.environ['GITHUB_SHA']:
+            raise ValueError('request differs from selected checkout')
+        if request['trusted_fingerprint'] != os.environ['TRUSTED_FINGERPRINT']:
+            raise ValueError('request fingerprint differs from protected independent trust setting')
+        # Remove key material from the environment before creating subprocesses.
+        private = os.environ.pop('SIGNING_PRIVATE_KEY')
+        if not private or len(private.encode()) > 1024 * 1024:
+            raise ValueError('bounded protected signing key required')
+        output = Path('build/distribution')
+        output.parent.mkdir(exist_ok=True)
+        channel.archive.write_json(output.parent / 'distribution-request.json', request)
+        with tempfile.TemporaryDirectory(prefix='foundation-private-key-', dir=os.environ['RUNNER_TEMP']) as temporary:
+            key = Path(temporary) / 'private.asc'
+            key.write_text(private); key.chmod(0o600)
+            del private
+            subprocess.run([sys.executable, '-B', 'tools/distribution_release.py', 'prepare',
+                '--request', str(output.parent / 'distribution-request.json'), '--output', str(output),
+                '--signing-key', str(key)], check=True, stdout=subprocess.DEVNULL)
+        result = channel.publish(output, Path('docs/release-policy.json'), request['trusted_fingerprint'], execute=True)
+        channel.archive.write_json(output.parent / 'distribution-publication.json', result)
+        selected = dict(tag=result['tag'], manifest_sha256=result['manifest_sha256'], target=request['target'])
+        with Path(os.environ['GITHUB_OUTPUT']).open('a') as stream:
+            stream.write('channel=' + json.dumps(selected) + '\n')
+        with Path(os.environ['GITHUB_STEP_SUMMARY']).open('a') as stream:
+            stream.write('Verified signed non-Latest package channel:\n```json\n' + json.dumps(result, indent=2) + '\n```\n')
+    - name: Retain signed controls and receipt; preserve complete prepared bytes on failure
+      if: ${{ always() && hashFiles('build/distribution/distribution.json') != '' }}
+      run: python .github/scripts/lifecycle.py bundle-store
+      env:
+        BUNDLE_NAME: distribution-${{ github.run_attempt }}
+        BUNDLE_PATHS: |
+          ${{ steps.publish.outcome != 'success' && 'build/distribution/' || 'build/distribution/distribution.json' }}
+          ${{ steps.publish.outcome == 'success' && 'build/distribution/distribution.json.sig' || '' }}
+          ${{ steps.publish.outcome == 'success' && 'build/distribution/archive-keyring.gpg' || '' }}
+          build/distribution-request.json
+          build/distribution-publication.json
+
+  qualify:
+    if: ${{ inputs.execute }}
+    needs: publish
+    permissions:
+      contents: write
+      actions: read
+    uses: ./.github/workflows/distro-check.yml
+    with:
+      channel: ${{ needs.publish.outputs.channel }}
+      previous: ${{ inputs.previous }}
+      distro: all
+      accept: true

@@ -1,0 +1,130 @@
+{
+  "bindings": [],
+  "blocks": [
+    {
+      "binding": "",
+      "breaks_cycle": false,
+      "factory": "foundation::editor::rust_dsp::make_source",
+      "file": "flow_adapter.cpp",
+      "flow": "rust-dsp.processing",
+      "header": "flow_adapter.hpp",
+      "id": "rust-dsp.source",
+      "inputs": [],
+      "label": "Sample source",
+      "outputs": [
+        {
+          "id": "out",
+          "required": true,
+          "type": "float"
+        }
+      ],
+      "params": {},
+      "symbol": "Source",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "binding": "",
+      "breaks_cycle": false,
+      "factory": "foundation::editor::rust_dsp::make_filter",
+      "file": "dsp.rs",
+      "flow": "rust-dsp.processing",
+      "header": "flow_adapter.hpp",
+      "id": "rust-dsp.filter",
+      "inputs": [
+        {
+          "id": "in",
+          "required": true,
+          "type": "float"
+        }
+      ],
+      "label": "Rust FIR / decimate 2",
+      "outputs": [
+        {
+          "id": "out",
+          "required": true,
+          "type": "float"
+        }
+      ],
+      "params": {},
+      "symbol": "process_samples",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "binding": "",
+      "breaks_cycle": false,
+      "factory": "foundation::editor::rust_dsp::make_sink",
+      "file": "flow_adapter.cpp",
+      "flow": "rust-dsp.processing",
+      "header": "flow_adapter.hpp",
+      "id": "rust-dsp.sink",
+      "inputs": [
+        {
+          "id": "in",
+          "required": true,
+          "type": "float"
+        }
+      ],
+      "label": "Result collector",
+      "outputs": [],
+      "params": {},
+      "symbol": "Sink",
+      "x": 0,
+      "y": 0
+    }
+  ],
+  "cpp_namespace": "foundation::generated",
+  "edges": [
+    {
+      "capacity": 3,
+      "from_block": "rust-dsp.source",
+      "from_port": "out",
+      "id": "rust-dsp.input",
+      "initial_tokens": 0,
+      "to_block": "rust-dsp.filter",
+      "to_port": "in"
+    },
+    {
+      "capacity": 1,
+      "from_block": "rust-dsp.filter",
+      "from_port": "out",
+      "id": "rust-dsp.output",
+      "initial_tokens": 0,
+      "to_block": "rust-dsp.sink",
+      "to_port": "in"
+    }
+  ],
+  "flows": [
+    {
+      "id": "rust-dsp.processing",
+      "label": "Rust FIR and decimation"
+    }
+  ],
+  "forms": [],
+  "generated_directory": "generated/visual",
+  "name": "Rust signal processing",
+  "recipes": [
+    {
+      "argv": [
+        "cmake",
+        "--build",
+        "../../../build/editor-rust-dsp",
+        "--parallel",
+        "2"
+      ],
+      "id": "build",
+      "label": "Build",
+      "working_directory": "."
+    },
+    {
+      "argv": [
+        "../../../build/editor-rust-dsp/foundation-editor-rust-dsp"
+      ],
+      "id": "run",
+      "label": "Run",
+      "working_directory": "."
+    }
+  ],
+  "schema_version": 1
+}

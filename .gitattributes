@@ -1,0 +1,18 @@
+# Keep exact retained-source identities stable on every checkout host.
+* text=auto eol=lf
+*.sh text eol=lf
+*.ps1 text eol=lf
+*.py text eol=lf
+*.cmake text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.cpp text eol=lf
+*.hpp text eol=lf
+*.png binary
+*.zip binary
+*.gz binary
+# A unified diff needs its one-space prefix on empty context lines.
+gui/patches/*.patch whitespace=-blank-at-eol
+# Preserve upstream bytes when a vendored source inventory requires exact hashes.
+# Add a narrowly scoped -text rule with each such dependency.

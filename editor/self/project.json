@@ -1,0 +1,410 @@
+{
+  "bindings": [
+    {
+      "anchor": "on_open",
+      "event": "activate",
+      "file": "editor/self/handlers.hpp",
+      "header": "editor/self/handlers.hpp",
+      "id": "self.open",
+      "symbol": "foundation::editor::self::on_open"
+    },
+    {
+      "anchor": "on_new",
+      "event": "activate",
+      "file": "editor/self/handlers.hpp",
+      "header": "editor/self/handlers.hpp",
+      "id": "self.new",
+      "symbol": "foundation::editor::self::on_new"
+    },
+    {
+      "anchor": "on_save",
+      "event": "activate",
+      "file": "editor/self/handlers.hpp",
+      "header": "editor/self/handlers.hpp",
+      "id": "self.save",
+      "symbol": "foundation::editor::self::on_save"
+    },
+    {
+      "anchor": "on_undo",
+      "event": "activate",
+      "file": "editor/self/handlers.hpp",
+      "header": "editor/self/handlers.hpp",
+      "id": "self.undo",
+      "symbol": "foundation::editor::self::on_undo"
+    },
+    {
+      "anchor": "on_redo",
+      "event": "activate",
+      "file": "editor/self/handlers.hpp",
+      "header": "editor/self/handlers.hpp",
+      "id": "self.redo",
+      "symbol": "foundation::editor::self::on_redo"
+    },
+    {
+      "anchor": "on_preview",
+      "event": "activate",
+      "file": "editor/self/handlers.hpp",
+      "header": "editor/self/handlers.hpp",
+      "id": "self.preview",
+      "symbol": "foundation::editor::self::on_preview"
+    },
+    {
+      "anchor": "on_build",
+      "event": "activate",
+      "file": "editor/self/handlers.hpp",
+      "header": "editor/self/handlers.hpp",
+      "id": "self.build",
+      "symbol": "foundation::editor::self::on_build"
+    },
+    {
+      "anchor": "on_run",
+      "event": "activate",
+      "file": "editor/self/handlers.hpp",
+      "header": "editor/self/handlers.hpp",
+      "id": "self.run",
+      "symbol": "foundation::editor::self::on_run"
+    },
+    {
+      "anchor": "on_stop",
+      "event": "activate",
+      "file": "editor/self/handlers.hpp",
+      "header": "editor/self/handlers.hpp",
+      "id": "self.stop",
+      "symbol": "foundation::editor::self::on_stop"
+    },
+    {
+      "anchor": "on_details",
+      "event": "activate",
+      "file": "editor/self/handlers.hpp",
+      "header": "editor/self/handlers.hpp",
+      "id": "self.details",
+      "symbol": "foundation::editor::self::on_details"
+    }
+  ],
+  "blocks": [
+    {
+      "binding": "",
+      "breaks_cycle": false,
+      "factory": "foundation::editor::self::source_bytes",
+      "file": "editor/self/flow.hpp",
+      "flow": "self.inspect",
+      "header": "editor/self/flow.hpp",
+      "id": "self.source",
+      "inputs": [],
+      "label": "Source file bytes",
+      "outputs": [
+        {
+          "id": "bytes",
+          "required": true,
+          "type": "std::uint8_t"
+        }
+      ],
+      "params": {},
+      "symbol": "foundation::editor::self::source_bytes",
+      "x": 24,
+      "y": 32
+    },
+    {
+      "binding": "",
+      "breaks_cycle": false,
+      "factory": "foundation::editor::self::count_bytes",
+      "file": "editor/self/flow.hpp",
+      "flow": "self.inspect",
+      "header": "editor/self/flow.hpp",
+      "id": "self.count",
+      "inputs": [
+        {
+          "id": "bytes",
+          "required": true,
+          "type": "std::uint8_t"
+        }
+      ],
+      "label": "Count bytes",
+      "outputs": [],
+      "params": {},
+      "symbol": "foundation::editor::self::count_bytes",
+      "x": 288,
+      "y": 32
+    }
+  ],
+  "cpp_namespace": "foundation::editor::self_generated",
+  "edges": [
+    {
+      "capacity": 256,
+      "from_block": "self.source",
+      "from_port": "bytes",
+      "id": "self.bytes",
+      "initial_tokens": 0,
+      "to_block": "self.count",
+      "to_port": "bytes"
+    }
+  ],
+  "flows": [
+    {
+      "id": "self.inspect",
+      "label": "Inspect source byte stream"
+    }
+  ],
+  "forms": [
+    {
+      "controls": [
+        {
+          "binding": "self.open",
+          "checked": false,
+          "enabled": true,
+          "event_bindings": {},
+          "id": "editor.open",
+          "kind": "button",
+          "label": "Open",
+          "layout": {
+            "height": 32,
+            "width": 72,
+            "x": 8,
+            "y": 8
+          },
+          "multiline": false,
+          "options": [],
+          "parent": "",
+          "read_only": false,
+          "text": "",
+          "text_limit": 1048576,
+          "visible": true
+        },
+        {
+          "binding": "self.new",
+          "checked": false,
+          "enabled": true,
+          "event_bindings": {},
+          "id": "editor.new",
+          "kind": "button",
+          "label": "New",
+          "layout": {
+            "height": 32,
+            "width": 62,
+            "x": 84,
+            "y": 8
+          },
+          "multiline": false,
+          "options": [],
+          "parent": "",
+          "read_only": false,
+          "text": "",
+          "text_limit": 1048576,
+          "visible": true
+        },
+        {
+          "binding": "self.save",
+          "checked": false,
+          "enabled": true,
+          "event_bindings": {},
+          "id": "editor.save",
+          "kind": "button",
+          "label": "Save",
+          "layout": {
+            "height": 32,
+            "width": 62,
+            "x": 150,
+            "y": 8
+          },
+          "multiline": false,
+          "options": [],
+          "parent": "",
+          "read_only": false,
+          "text": "",
+          "text_limit": 1048576,
+          "visible": true
+        },
+        {
+          "binding": "self.undo",
+          "checked": false,
+          "enabled": true,
+          "event_bindings": {},
+          "id": "editor.undo",
+          "kind": "button",
+          "label": "Undo",
+          "layout": {
+            "height": 32,
+            "width": 64,
+            "x": 216,
+            "y": 8
+          },
+          "multiline": false,
+          "options": [],
+          "parent": "",
+          "read_only": false,
+          "text": "",
+          "text_limit": 1048576,
+          "visible": true
+        },
+        {
+          "binding": "self.redo",
+          "checked": false,
+          "enabled": true,
+          "event_bindings": {},
+          "id": "editor.redo",
+          "kind": "button",
+          "label": "Redo",
+          "layout": {
+            "height": 32,
+            "width": 64,
+            "x": 284,
+            "y": 8
+          },
+          "multiline": false,
+          "options": [],
+          "parent": "",
+          "read_only": false,
+          "text": "",
+          "text_limit": 1048576,
+          "visible": true
+        },
+        {
+          "binding": "self.preview",
+          "checked": false,
+          "enabled": true,
+          "event_bindings": {},
+          "id": "editor.preview",
+          "kind": "button",
+          "label": "Preview",
+          "layout": {
+            "height": 32,
+            "width": 78,
+            "x": 352,
+            "y": 8
+          },
+          "multiline": false,
+          "options": [],
+          "parent": "",
+          "read_only": false,
+          "text": "",
+          "text_limit": 1048576,
+          "visible": true
+        },
+        {
+          "binding": "self.build",
+          "checked": false,
+          "enabled": true,
+          "event_bindings": {},
+          "id": "editor.build",
+          "kind": "button",
+          "label": "Build",
+          "layout": {
+            "height": 32,
+            "width": 64,
+            "x": 434,
+            "y": 8
+          },
+          "multiline": false,
+          "options": [],
+          "parent": "",
+          "read_only": false,
+          "text": "",
+          "text_limit": 1048576,
+          "visible": true
+        },
+        {
+          "binding": "self.run",
+          "checked": false,
+          "enabled": true,
+          "event_bindings": {},
+          "id": "editor.run",
+          "kind": "button",
+          "label": "Run",
+          "layout": {
+            "height": 32,
+            "width": 58,
+            "x": 502,
+            "y": 8
+          },
+          "multiline": false,
+          "options": [],
+          "parent": "",
+          "read_only": false,
+          "text": "",
+          "text_limit": 1048576,
+          "visible": true
+        },
+        {
+          "binding": "self.stop",
+          "checked": false,
+          "enabled": true,
+          "event_bindings": {},
+          "id": "editor.stop",
+          "kind": "button",
+          "label": "Stop",
+          "layout": {
+            "height": 32,
+            "width": 62,
+            "x": 564,
+            "y": 8
+          },
+          "multiline": false,
+          "options": [],
+          "parent": "",
+          "read_only": false,
+          "text": "",
+          "text_limit": 1048576,
+          "visible": true
+        },
+        {
+          "binding": "self.details",
+          "checked": false,
+          "enabled": true,
+          "event_bindings": {},
+          "id": "editor.details",
+          "kind": "button",
+          "label": "Details",
+          "layout": {
+            "height": 32,
+            "width": 72,
+            "x": 630,
+            "y": 8
+          },
+          "multiline": false,
+          "options": [],
+          "parent": "",
+          "read_only": false,
+          "text": "",
+          "text_limit": 1048576,
+          "visible": true
+        }
+      ],
+      "height": 720,
+      "id": "editor.chrome",
+      "label": "Editor toolbar",
+      "width": 1100
+    }
+  ],
+  "generated_directory": "editor/self/generated/visual",
+  "name": "Foundation editor self-host",
+  "recipes": [
+    {
+      "argv": [
+        "./build.sh",
+        "editor",
+        "build",
+        "dev",
+        "--backend",
+        "fltk",
+        "--build-dir",
+        "build/editor-fltk"
+      ],
+      "id": "build",
+      "label": "Build this editor (FLTK)",
+      "working_directory": "."
+    },
+    {
+      "argv": [
+        "./build/editor-fltk/foundation-editor-fltk",
+        "--project",
+        "editor/self/project.json",
+        "--root",
+        "."
+      ],
+      "id": "run",
+      "label": "Run rebuilt editor",
+      "working_directory": "."
+    }
+  ],
+  "schema_version": 1
+}

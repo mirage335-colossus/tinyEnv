@@ -1,0 +1,25 @@
+name: Delete temporary artifacts
+run-name: Delete all repository Actions artifacts
+'on':
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: write
+concurrency:
+  group: foundation-manual-artifact-cleanup
+  cancel-in-progress: false
+jobs:
+  cleanup:
+    name: Delete artifact snapshot when other workflows are idle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Delete temporary artifacts and summarize reclaimed storage
+      run: python3 -B tools/ci_cleanup_repository.py
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PYTHONUTF8: '1'
+        PYTHONDONTWRITEBYTECODE: '1'

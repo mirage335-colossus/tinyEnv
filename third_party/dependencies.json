@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "application_runtime_dependencies": [],
+  "platform_runtime_policy": "docs/portability.md",
+  "build_requirements": "docs/building.md",
+  "optional_integrations": [
+    {
+      "name": "gui-boundary",
+      "upstream_repository": "https://github.com/mirage335-colossus/gui-boundary",
+      "acquisition": "checkout-contained verified source group; explicit external source/group override",
+      "identity_record": "third_party/gui-boundary.lock.json",
+      "revision_policy": "Select the exact reviewed revision documented by the integration; never use a moving branch implicitly.",
+      "maintenance_document": "docs/gui-boundary.md",
+      "license_status": "CC0 for project-owned code; separately retained supplier notices and owner-specific Rev source/binary permission. See the locked redistribution scope; downstream users must establish their own supplier permissions.",
+      "distributed_by_default": true,
+      "retained_source_group": "third_party/gui-inputs"
+    }
+  ],
+  "policy_document": "docs/dependencies.md",
+  "prepared_sdk_recipes": [
+    {
+      "name": "native-source-sdk-x86_64",
+      "recipe": "third_party/sdk/recipe.json",
+      "producer": "tools/distro_sdk.py",
+      "kind": "source-build",
+      "baseline": "Debian 12 Bookworm / glibc 2.36",
+      "qualification": "Separate core-only recipe is not qualified by the all-gui recipe results; see docs/validation.md."
+    },
+    {
+      "name": "native-source-sdk-aarch64",
+      "recipe": "third_party/sdk/aarch64/recipe.json",
+      "producer": "tools/distro_sdk.py",
+      "kind": "source-build",
+      "baseline": "Debian 12 Bookworm / glibc 2.36",
+      "qualification": "Separate core-only recipe is not qualified by the all-gui recipe results; see docs/validation.md."
+    },
+    {
+      "name": "webassembly-build-sdk",
+      "recipe": "third_party/sdk/wasm.json",
+      "producer": "tools/sdk_wasm.py",
+      "kind": "retained-upstream",
+      "source_scope": "Exact source and precompiled supplier archives retained; no native LLVM/Node source rebuild claim",
+      "qualification": "See docs/validation.md",
+      "included_tools": "Emscripten, compiler bundle, Node; no desktop browsers",
+      "validation_hosts": "Separately installed distro or no-cost desktop browsers"
+    },
+    {
+      "name": "windows-dependencies",
+      "recipe": "third_party/sdk/windows-base.json",
+      "producer": "tools/sdk_windows.py",
+      "kind": "windows-dependencies",
+      "host_tools": "Separately installed v143 and pinned Windows SDK; offline installer layout retained separately",
+      "qualification": "Separate core-only recipe is not qualified by the all-gui recipe results; see docs/validation.md."
+    },
+    {
+      "name": "native-gui-sdk-x86_64",
+      "recipe": "third_party/sdk/gui-x86_64/recipe.json",
+      "producer": "tools/distro_sdk.py",
+      "kind": "source-build",
+      "baseline": "Debian 12 Bookworm / glibc 2.36",
+      "qualification": "Passed cold production and relocated consumers for recipe bdd39974a891e6161d667bbaa0ff2c1894fe9f188ed76d47d1ad6c896972c9f8; see docs/validation.md for exact revisions/runs. Later application changes require their own evidence.",
+      "profile": "FLTK, SDL2, X11 and OpenGL development inputs; full sources retained"
+    },
+    {
+      "name": "native-gui-sdk-aarch64",
+      "recipe": "third_party/sdk/gui-aarch64/recipe.json",
+      "producer": "tools/distro_sdk.py",
+      "kind": "source-build",
+      "baseline": "Debian 12 Bookworm / glibc 2.36",
+      "qualification": "Passed cold production and relocated native ARM64 consumers for recipe 88c7d871f5cf6210cb4dac6874e666a275dd5f359d42439369a7206b39dbe109; see docs/validation.md for exact revisions/runs.",
+      "profile": "FLTK, SDL2, X11 and OpenGL development inputs; full sources retained"
+    },
+    {
+      "name": "windows-gui-dependencies",
+      "recipe": "third_party/sdk/windows-gui/windows-base.json",
+      "producer": "tools/sdk_windows.py",
+      "kind": "windows-dependencies",
+      "host_tools": "Separately installed v143 and pinned Windows SDK; offline installer layout retained separately",
+      "qualification": "Passed native Windows production and relocated consumers for recipe cd16aeb6bd2dff13115d456ffbea2d166db37427106a5e03961926f840f10feb; see docs/validation.md. Compiler and Windows SDK remain host prerequisites.",
+      "profile": "FLTK and SDL2 static libraries; GUI source group retains GLEW and FreeType"
+    }
+  ]
+}

@@ -1,0 +1,128 @@
+name: Explicit native GUI qualification
+'on':
+  workflow_dispatch:
+    inputs:
+      core_provider:
+        description: Application provider; cpp explicitly selects legacy compatibility
+        type: choice
+        options: [rust, cpp]
+        default: rust
+      target:
+        description: Native execution host
+        type: choice
+        options:
+        - windows-x86_64
+        - linux-x86_64
+        - linux-aarch64
+        default: windows-x86_64
+      recipe:
+        description: Exact complete GUI-capable dependency recipe already in base
+        type: string
+        required: true
+      graphics_archive_url:
+        description: Operator-retained HTTPS host graphics archive; required for Windows
+        type: string
+        default: ''
+      gui_input:
+        description: Optional exact existing base or retained GUI selector JSON; empty uses verified checkout inputs
+        type: string
+        default: ''
+      development:
+        description: Qualify ordinary build dev and test dev without portable mode (Linux only)
+        type: boolean
+        default: false
+      linux_pool:
+        description: Standard or explicitly configured faster native runners
+        type: choice
+        options: [standard, faster]
+        default: standard
+      jobs:
+        description: Auto uses available CPU and RAM; explicit compile override
+        type: choice
+        options: [auto, '2', '4', '8']
+        default: auto
+permissions:
+  contents: read
+  actions: read
+env:
+  GH_TOKEN: ${{ github.token }}
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+  CORE_PROVIDER: ${{ inputs.core_provider }}
+  LINUX_POOL: ${{ inputs.linux_pool }}
+  FOUNDATION_FASTER_LINUX_RUNNER: ${{ vars.FOUNDATION_FAST_LINUX_RUNNER }}
+  FOUNDATION_FASTER_ARM_RUNNER: ${{ vars.FOUNDATION_FAST_ARM_RUNNER }}
+  FOUNDATION_FASTER_WINDOWS_RUNNER: ${{ vars.FOUNDATION_FAST_WINDOWS_RUNNER }}
+  TARGET: ${{ inputs.target }}
+  RECIPE: ${{ inputs.recipe }}
+  GUI_INPUT: ${{ inputs.gui_input }}
+  JOBS: ${{ inputs.jobs }}
+  GRAPHICS_ARCHIVE_URL: ${{ inputs.graphics_archive_url }}
+  SDK_DEVELOPMENT: ${{ inputs.development }}
+jobs:
+  plan:
+    name: Validate and freeze the selected native runner
+    runs-on: ubuntu-24.04
+    outputs:
+      runner: ${{ steps.plan.outputs.runner }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - id: plan
+      run: python .github/scripts/lifecycle.py runner-plan
+  qualify:
+    needs: plan
+    runs-on: ${{ needs.plan.outputs.runner }}
+    timeout-minutes: 120
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Verify the explicitly supplied retained Windows graphics input
+      if: runner.os == 'Windows'
+      run: python .github/scripts/lifecycle.py graphics-input
+    - run: python .github/scripts/lifecycle.py fetch-sdk
+    - name: Restore the exact complete retained Rust extension
+      if: inputs.core_provider == 'rust'
+      run: python .github/scripts/lifecycle.py fetch-rust-sdk
+    - name: Restore and verify the exact retained GUI group
+      if: inputs.gui_input != ''
+      run: python .github/scripts/lifecycle.py gui-input
+    - name: Verify and use checkout-contained GUI inputs
+      if: inputs.gui_input == ''
+      run: python .github/scripts/lifecycle.py checkout-gui-input
+    - if: runner.os == 'Windows'
+      shell: pwsh
+      run: ./tools/ci_windows.ps1 -Output 'build/windows-toolchain.json'
+    - if: runner.os == 'Windows'
+      run: python .github/scripts/lifecycle.py native-gui-check
+    - if: runner.os == 'Linux'
+      shell: python
+      run: |
+        import subprocess, sys
+        subprocess.run([sys.executable, '.github/scripts/container_job.py', 'native-gui-check'], check=True)
+    - if: always()
+      name: Retain verified native-gui-evidence-${{ inputs.target }}-${{ github.run_attempt }}
+      run: python .github/scripts/lifecycle.py bundle-store
+      env:
+        BUNDLE_NAME: native-gui-evidence-${{ inputs.target }}-${{ github.run_attempt }}
+        BUNDLE_PATHS: |-
+          ${{ job.status == 'failure' && 'build/receipts/failure.json' || '' }}
+          build/native-gui/qualification.json
+          build/native-gui/source.junit.xml
+          build/native-gui/build/Testing/Temporary/
+          build/native-gui/build/test-reports/
+          build/native-gui/graphics.json
+          build/native-gui/graphics-probe.json
+          build/native-gui/graphics-test.log
+          build/native-gui/graphics-compile.log
+          build/native-gui/build/gui/visual-evidence/**/*.json
+          build/native-gui/build/gui/visual-evidence/**/*.png
+          build/native-gui/build/gui/visual-evidence/**/*.ppm
+          build/native-gui/build/gui/visual-evidence/**/*.log
+          build/host-graphics/acquisition.json
+          build/gui-origin.json
+    permissions:
+      contents: write
+      actions: read

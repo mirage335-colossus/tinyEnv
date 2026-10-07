@@ -1,0 +1,226 @@
+name: Explicit prepared SDK maintenance
+'on':
+  workflow_dispatch:
+    inputs:
+      core_provider:
+        description: Rust application consumers and retained extension; cpp selects legacy SDK probes
+        type: choice
+        options: [rust, cpp]
+        default: rust
+      target:
+        description: Explicit producer target
+        type: choice
+        options:
+        - linux-x86_64
+        - linux-aarch64
+        - windows-x86_64
+        - browser-wasm32
+        - all
+        default: windows-x86_64
+      linux_pool:
+        description: Standard or explicitly configured faster native runners
+        type: choice
+        options: [standard, faster]
+        default: standard
+      jobs:
+        description: Auto uses available CPU and RAM; explicit compile override
+        type: choice
+        options: [auto, '2', '4', '8']
+        default: auto
+      execute:
+        description: Publish verified complete groups into durable base storage
+        type: boolean
+        default: false
+      profile:
+        description: Dependency capability recipe, separate from application features
+        type: choice
+        options:
+        - core
+        - all-gui
+        default: core
+      source:
+        description: Select base policy, explicit cold rebuild, or exact unqualified retained bytes
+        type: choice
+        options:
+        - auto
+        - base
+        - rebuild
+        - retained
+        default: auto
+      gui_input:
+        description: Exact existing base or retained GUI selector JSON; required for all-gui
+        type: string
+        default: ''
+      graphics_archive_url:
+        description: Retained Windows graphics archive; required except explicit cold rebuild
+        type: string
+        default: ''
+      retained_input:
+        description: Exact version-2 JSON producer and draft-bundle manifest identities for retained input
+        type: string
+        required: false
+        default: ''
+permissions:
+  contents: read
+  actions: read
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - shell: python
+      run: |-
+        import subprocess, sys
+        subprocess.run([sys.executable, '.github/scripts/lifecycle.py', 'sdk-plan'], check=True)
+      id: plan
+      env:
+        TARGET: ${{ inputs.target }}
+        SDK_PROFILE: ${{ inputs.profile }}
+        SDK_SOURCE: ${{ inputs.source }}
+        SDK_RETAINED_INPUT: ${{ inputs.retained_input }}
+        GUI_INPUT: ${{ inputs.gui_input }}
+  produce:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    env:
+      TARGET: ${{ matrix.target }}
+      JOBS: ${{ inputs.jobs }}
+      SDK_PROFILE: ${{ inputs.profile }}
+      SDK_SOURCE: ${{ inputs.source }}
+      SDK_RETAINED_INPUT: ${{ inputs.retained_input }}
+      GUI_INPUT: ${{ inputs.gui_input }}
+      GRAPHICS_ARCHIVE_URL: ${{ inputs.graphics_archive_url }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Explicit cold maintenance of the pinned disposable Windows graphics prerequisite
+      if: runner.os == 'Windows' && inputs.profile == 'all-gui' && inputs.source == 'rebuild' && inputs.graphics_archive_url == ''
+      run: python .github/scripts/lifecycle.py graphics-maintain
+    - name: Verify the retained Windows graphics prerequisite
+      if: runner.os == 'Windows' && inputs.profile == 'all-gui' && (inputs.source != 'rebuild' || inputs.graphics_archive_url != '')
+      run: python .github/scripts/lifecycle.py graphics-input
+    - name: Resolve exact retained group or positively observed absence
+      run: python .github/scripts/lifecycle.py sdk-inputs
+    - name: Restore exact existing GUI inputs without supplier access
+      if: inputs.profile == 'all-gui'
+      run: python .github/scripts/lifecycle.py gui-input
+    - if: runner.os == 'Windows'
+      shell: pwsh
+      run: ./tools/ci_windows.ps1 -Output 'build/windows-toolchain.json'
+    - shell: python
+      run: |
+        import subprocess, sys
+        subprocess.run([sys.executable, '.github/scripts/container_job.py', 'sdk-produce'], check=True)
+      if: runner.os == 'Linux'
+    - shell: python
+      run: |-
+        import subprocess, sys
+        subprocess.run([sys.executable, '.github/scripts/lifecycle.py', 'sdk-produce'], check=True)
+      if: runner.os == 'Windows'
+    - name: Verify complete SDK bytes for unqualified retention
+      id: retain
+      if: always()
+      run: python .github/scripts/lifecycle.py sdk-retain
+    - if: always() && steps.retain.outcome == 'success' && steps.retain.outputs.retained == 'true'
+      name: Retain verified sdk-group-${{ matrix.target }}-${{ github.run_attempt }}
+      run: python .github/scripts/lifecycle.py bundle-store
+      env:
+        BUNDLE_NAME: sdk-group-${{ matrix.target }}-${{ github.run_attempt }}
+        BUNDLE_PATHS: build/sdk-group/
+    - name: Retain the complete Rust extension and reconstruction inputs
+      if: always() && inputs.core_provider == 'rust' && hashFiles('build/rust-sdk-group/*-SHA256SUMS') != ''
+      run: python .github/scripts/lifecycle.py bundle-store
+      env:
+        BUNDLE_NAME: rust-sdk-group-${{ matrix.target }}-${{ github.run_attempt }}
+        BUNDLE_PATHS: build/rust-sdk-group/
+    - name: Retain verified sdk-plan-${{ matrix.target }}-${{ github.run_attempt }}
+      run: python .github/scripts/lifecycle.py bundle-store
+      env:
+        BUNDLE_NAME: sdk-plan-${{ matrix.target }}-${{ github.run_attempt }}
+        BUNDLE_PATHS: build/sdk-publication-plan.json
+    - name: Retain Rust publication preparation
+      if: always() && inputs.core_provider == 'rust' && hashFiles('build/rust-sdk-publication-plan.json') != ''
+      run: python .github/scripts/lifecycle.py bundle-store
+      env:
+        BUNDLE_NAME: rust-sdk-plan-${{ matrix.target }}-${{ github.run_attempt }}
+        BUNDLE_PATHS: build/rust-sdk-publication-plan.json
+    - if: always()
+      name: Retain verified sdk-proof-${{ matrix.target }}-${{ github.run_attempt }}
+      run: python .github/scripts/lifecycle.py bundle-store
+      env:
+        BUNDLE_NAME: sdk-proof-${{ matrix.target }}-${{ github.run_attempt }}
+        BUNDLE_PATHS: |-
+          build/gui-origin.json
+          build/sdk-origin.json
+          build/sdk-isolation.json
+          build/rust-sdk-isolation.json
+          build/rust-sdk-origin.json
+          build/sdk-retention.json
+          build/sdk-consumer/qualification.json
+          build/sdk-consumer/source.junit.xml
+          build/sdk-consumer/build/Testing/Temporary/
+          build/sdk-gui-consumer/qualification.json
+          build/sdk-gui-consumer/source.junit.xml
+          build/sdk-gui-consumer/build/Testing/Temporary/
+          build/sdk-gui-consumer/build/test-reports/
+          build/sdk-gui-consumer/graphics.json
+          build/sdk-gui-consumer/graphics-probe.json
+          build/sdk-gui-consumer/graphics-test.log
+          build/sdk-gui-consumer/graphics-compile.log
+          build/sdk-gui-consumer/build/gui/visual-evidence/**/*.json
+          build/sdk-gui-consumer/build/gui/visual-evidence/**/*.png
+          build/sdk-gui-consumer/build/gui/visual-evidence/**/*.ppm
+          build/sdk-gui-consumer/build/gui/visual-evidence/**/*.log
+          build/host-graphics/acquisition.json
+    permissions:
+      contents: write
+      actions: read
+  publish:
+    if: inputs.execute
+    needs: produce
+    runs-on: ubuntu-24.04
+    environment: release-publisher
+    concurrency:
+      group: foundation-release-lifecycle
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      actions: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - shell: python
+      run: |
+        import subprocess,sys
+        subprocess.run([sys.executable,'.github/scripts/lifecycle.py','fetch-sdk-bundles'],check=True)
+      env:
+        SDK_TARGET: ${{ inputs.target }}
+    - shell: python
+      run: |-
+        import subprocess, sys
+        subprocess.run([sys.executable, '.github/scripts/lifecycle.py', 'publish-bases'], check=True)
+    - if: always()
+      name: Retain verified sdk-delivery-${{ github.run_attempt }}
+      run: python .github/scripts/lifecycle.py bundle-store
+      env:
+        BUNDLE_NAME: sdk-delivery-${{ github.run_attempt }}
+        BUNDLE_PATHS: build/receipts/
+env:
+  GH_TOKEN: ${{ github.token }}
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+  CORE_PROVIDER: ${{ inputs.core_provider }}
+  LINUX_POOL: ${{ inputs.linux_pool }}
+  FOUNDATION_FASTER_LINUX_RUNNER: ${{ vars.FOUNDATION_FAST_LINUX_RUNNER }}
+  FOUNDATION_FASTER_ARM_RUNNER: ${{ vars.FOUNDATION_FAST_ARM_RUNNER }}
+  FOUNDATION_FASTER_WINDOWS_RUNNER: ${{ vars.FOUNDATION_FAST_WINDOWS_RUNNER }}

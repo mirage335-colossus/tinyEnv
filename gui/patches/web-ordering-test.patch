@@ -1,0 +1,47 @@
+--- web_renderer_test.mjs
++++ web_renderer_test.mjs
+@@ -1,5 +1,5 @@
+ import assert from 'node:assert/strict';
+-import {Client,Renderer,identity,byteOffset,utf16Offset,executeService} from '../backends/web/renderer.mjs';
++import {Client,Renderer,identity,byteOffset,utf16Offset,executeService} from '../web/renderer.mjs';
+ const tick=()=>new Promise(resolve=>setTimeout(resolve,0));
+ assert.equal(byteOffset('aé😃z',4),7);assert.equal(utf16Offset('aé😃z',7),4);assert.equal(utf16Offset('aé😃z',5),2);
+ assert.notEqual(identity({id:'a',generation:'1'}),identity({id:'a',generation:'2'}));
+@@ -102,3 +102,37 @@
+ assert.equal(textarea.value,multiline.text,'soft wrapping must not insert hard line breaks into text');
+ assert.equal(renderer.nodes.get(identity(wideList.key)).rows.style.width,'360px','content extent updates without replacing row data');
+ console.log('web transport, retained DOM mechanics, shared rectangles and Unicode offsets passed');
++
++// A delayed earlier operation must not let a later edit cross an action.
++const ordered=[],gate={};
++const sequenceClient=new Client(async envelope=>{
++  if(envelope.operation.type==='hold')await new Promise(resolve=>{gate.resolve=resolve;});
++  ordered.push(envelope.operation);
++  return {epoch:'ordered',ack:envelope.seq,snapshot:{},error:''};
++},()=>{});
++sequenceClient.accept({epoch:'ordered',ack:'0',snapshot:{}});
++const hold=sequenceClient.send({type:'hold'});
++const edits=[sequenceClient.send({type:'edit',value:'first'},'editor'),
++  sequenceClient.send({type:'activate'}),
++  sequenceClient.send({type:'edit',value:'second'},'editor'),
++  sequenceClient.send({type:'edit',value:'latest'},'editor'),
++  sequenceClient.send({type:'edit',value:'other'},'other-editor'),
++  sequenceClient.send({type:'edit',value:'after other'},'editor')];
++gate.resolve();await hold;await Promise.all(edits);
++assert.deepEqual(ordered.map(value=>value.value||value.type),
++  ['hold','first','activate','latest','other','after other']);
++assert.equal(sequenceClient.queue.length,0);
++console.log('Action barriers and adjacent-only edit coalescing passed');
++
++let finishDelivery,paints=0;
++const closing=new Client(()=>new Promise(resolve=>{finishDelivery=resolve;}),()=>++paints);
++closing.accept({epoch:'closing',ack:'0',snapshot:{}});
++const active=closing.send({type:'activate'}),queued=closing.send({type:'edit'},'editor');
++const rejected=Promise.all([assert.rejects(active,/Session closed/),assert.rejects(queued,/Session closed/)]);
++closing.close();await rejected;assert.equal(closing.queue.length,0);assert.equal(closing.inflight,null);
++finishDelivery({epoch:'closing',ack:'1',snapshot:{}});await tick();assert.equal(paints,1,'late delivery repainted a closed session');
++await assert.rejects(closing.send({type:'poll'}),/Session closed/);closing.retry();assert.equal(closing.running,false);
++const abortPrompt=new AbortController();
++const withdrawn=executeService({id:'5',kind:2,title:'Withdrawn prompt',value:'',byteLimit:'9'},{document,signal:abortPrompt.signal});
++const withdrawnDialog=document.body.children.at(-1);abortPrompt.abort();assert.equal((await withdrawn).status,'cancelled');assert.equal(withdrawnDialog.open,false);
++console.log('Closed clients reject pending work; late delivery and withdrawn prompt release ownership');

@@ -1,0 +1,249 @@
+SOFTWARE FOUNDATION DOCUMENTATION EXPLORER AND OPTIONAL EDITOR CONTRACT
+Read-only investigation: 2026-10-06, America/Chicago.
+Application checkout investigated: e33d72a3e2229e9c876f30dd1d52e583756ec1b9.
+Application source, published documentation, build and Git state were not changed.
+Only this production research note was saved. PDF inspection used text extraction
+and rendered representative pages in an independent /tmp directory.
+
+READER ENTRY POINT: ALREADY INCLUDED, OFFLINE
+
+Open documentation-tool/published/index.html from a local clone or downloaded
+copy in a browser. Keep the complete published/ directory together: index.html,
+explorer.js, explorer.css, data.js, atlas.json, the conceptual HTML guide and pdf/.
+The page loads its stylesheet and JavaScript/data from relative local files.
+The shipped explorer contains no fetch, XMLHttpRequest or WebSocket calls.
+Reading this bundle requires no web server, Python environment, compiler, AI
+service, API key, generator run or access to the original capture directory.
+GitHub's normal HTML file view shows source; download/open locally to use the
+interactive explorer. GitHub can display the PDF collection directly.
+
+Evidence: documentation-tool/README.md:10–16, 33–45;
+documentation-tool/published/index.html:1–32; shipped explorer.js:1.
+docs/documentation.md specifies topic/index/contract documentation separately;
+the documentation-tool README is the maintained home for this graphical reader.
+
+THE ACTUAL INCLUDED SNAPSHOT
+
+atlas.json reports generated_at = 2026-10-04T23:16:35-05:00, source_root = ".",
+387 captured files, 10 edit maps, 7 execution scenarios, 35 literal code maps,
+and 6 included PDF volumes. No editor/ source files are in this published capture.
+The optional graphical editor was added after this snapshot.
+
+Explain the explorer as the main Entry-list application's source-backed map.
+Its widget edit recipe follows handwritten gui/shared/view_definition.hpp and
+gui/shared/application.cpp. The Simple C visual starter uses project.json and
+its own source files, shown separately in the tutorial. Do not imply that the
+published atlas includes current Simple C/Forms/Flows example files.
+
+The atlas is a curated static-analysis navigation snapshot, not a recorded
+execution or a configured CMake graph. It can lag current source. Source links
+show captured bytes; check current source before applying a recipe. For example,
+the snapshot's shared GUI target was at gui/CMakeLists.txt:104, while the current
+checkout defines foundation_gui_application at :28. The path/target still has
+the same ownership role; displayed captured line numbers are not current ones.
+
+EXACT HTML NAVIGATION FOR A TUTORIAL RECORDING
+
+All routes below append to documentation-tool/published/index.html.
+The actual shipped explorer.js constructs these labels and hash routes.
+The browser UI tool was unavailable in this investigation (no enabled browsers),
+so these navigation findings come from the delivered HTML/JS/data and linked PDFs,
+not a newly executed UI interaction. The production capture can verify the clicks.
+
+1. Open index.html. The sidebar item is "Edit task maps" (#home).
+   The opening task chooser includes "Add a widget & click handler".
+   Click it: #home/widget.
+   Chart title: "Add a clickable widget and a helper".
+   Click "1. Declare the widget": #change/widget/widget-row.
+   The selected step explains What to change / Why here and shows
+   gui/shared/view_definition.hpp:22, an existing button-row pattern, and the
+   ViewDefinition parameter guide. Controls include "Open source at L22",
+   "File overview" and "Read in PDF".
+   The latter is a source-context PDF link, not necessarily the chart itself:
+   the exact row's captured-source context is 01-code-walkthroughs.pdf page 119.
+   The ViewDefinition struct's full symbol reference is page 4 in that volume.
+   The footer collection "Print these edit paths" opens 00-edit-paths.pdf.
+
+2. Choose "Add a source file to the compiler": #home/source-files.
+   Chart title: "Make a new source file compile".
+   Click "Core .cpp": #change/source-files/core-cpp.
+   It shows src/new_file.cpp -> foundation_core, the root CMakeLists.txt source
+   list, the public-header directory, and a target_sources parameter guide.
+   "Shared GUI .cpp" is #change/source-files/gui-cpp.
+   "Rust module .rs" is #change/source-files/rust-module.
+   The chart branches separately for header-only or existing-file method changes.
+   The chart in 00-edit-paths.pdf starts at page 12; target_sources guide is p41.
+
+3. Sidebar "Compiler & toolchain": #build.
+   This shows target declarations, source entries, dependencies, cache/default
+   declarations and presets as a lexical inventory. Expand foundation_core:
+   #build/target/0.
+   It lists src/store.cpp and src/text_validation.cpp from CMakeLists.txt:58.
+   "Read target in PDF" opens pdf/02-compiler-reference.pdf#page=4.
+   Shared GUI application target is #build/target/12 and its PDF target is p7.
+   This view does not execute CMake or establish an active platform configuration.
+
+4. Sidebar "What runs when…": #flows.
+   Scenario choices are Compile, Test, Release, Startup, Button click, Import,
+   Export. Choose "Button click": #flow/button-click.
+   Chart title: "Button click: Add entry to visible result".
+   Follow delivery -> Application::handle -> append_entry -> Store::add ->
+   validation -> return/status -> publication by handle.
+   Click a scenario box to open its deeper literal code diagram, not to run it.
+   "Read scenario in PDF" opens pdf/03-execution-flows.pdf#page=15.
+   The Compile scenario is #flow/compile and its PDF begins at page 2.
+
+5. Opening-page link "main() → widget definitions":
+   #code/main-to-widgets/entry.
+   It follows the native entry, Session, Application constructor, declaration
+   loop and widget creation. view_definition rows feed the loop as DATA,
+   distinct from a function-call arrow. Layout/presentation happen afterward.
+   Click a box for a deeper code diagram or its source location.
+   "Read code diagram in PDF" opens pdf/04-code-flowcharts.pdf#page=3.
+   Widget declarations are #code/widget-definitions (PDF page 4).
+
+6. Sidebar "AI-authored GUI guide" or the prominent home-page companion link
+   opens documentation-tool/published/AI-AUTHORED__GUI-MENTAL-MODEL.html.
+   Start with "From main to a widget" (#main-to-widget). Tabs also include
+   "The shared GUI boundary", "Shared widget data becomes a presented view",
+   and "An Add click reaches core, then refreshes the view".
+   Click a diagram card to follow its detailed source-backed code diagram.
+   Its "Source L…" link is a separate direct source route.
+   "This diagram in PDF" opens the same-named PDF at page 2 for main-to-widget.
+
+7. Sidebar "Printable chapters": #pdfs.
+   This lists the same six included PDF volumes. Each HTML view also supplies
+   "Print this view" for its current browser print layout.
+
+Source anchors for route mechanics:
+documentation-tool/published/explorer.js:112–124 (sidebar),
+:194–221 (edit-task and scenario choices), :246–269 (step/detail source links),
+:661–675 (targets and PDF actions), :835–853 (hash routing).
+The top search box reads "Find a function, class, or file…" and searches the
+captured data locally. PDF and deeper code buttons remain separate from source.
+
+PDF COUNTERPARTS: PURPOSE AND REPRESENTATIVE VERIFIED PAGES
+
+All paths share documentation-tool/published/pdf/.
+
+00-edit-paths.pdf — 45 pages.
+  p1 task chooser; p2 widget/helper edit chart; p3–4 the selected actions;
+  p12 source-file chart; p13–14 actions; p32 parameter-reference index;
+  p41 target_sources guide. Colors distinguish EDIT, REUSE, DECISION, NEW, JUMP.
+  Arrows describe edit dependencies; NEW labels mark proposed additions.
+
+01-code-walkthroughs.pdf — 122 pages.
+  p1–3 reference index; p4 ViewDefinition's complete captured declaration,
+  source line numbers, ownership and linked edit steps. Source-only row context
+  used by the widget chart is p119. Full captured source differs from selected
+  code cards and syntax-derived caller/callee candidate lists.
+
+02-compiler-reference.pdf — 59 pages.
+  p1 index/limitations; p4 foundation_core, its alias and foundation-cli source
+  and link entries; p7 foundation_gui_application. Preserved lexical declarations
+  include conditions/variables rather than one evaluated build configuration.
+
+03-execution-flows.pdf — 25 pages.
+  p1 scenario chooser; p2 compile overview; p15 Add-button click overview.
+  Arrows distinguish call, return, conditional, event, subprocess and local step.
+  These scenarios are reconstructed from source, not recorded runtime traces.
+
+04-code-flowcharts.pdf — 78 pages.
+  p1–2 index; p3 main-to-widgets; p4–5 widget declarations/consumer; p44 Add-button
+  dispatch; p45 append_entry; p47 Store::add; p48 validation. Cards contain
+  literal numbered source lines and links to deeper diagrams and parents.
+  A + denotes wrapped continuation of the same source line, not an omitted line.
+
+AI-AUTHORED__GUI-MENTAL-MODEL.pdf — 5 pages.
+  p1 guide/index; p2 main-to-widget; p3 GUI boundary; p4 model-to-pixels;
+  p5 Add click. The authorship label remains explicit and its simplified paths
+  lead to detailed code references. It was authored 2026-10-04 and rendered from
+  retained local explanatory JSON, with no AI call during documentation generation.
+
+Representative PDF pages listed above were rendered and visually inspected.
+This confirms document content/layout/navigation purpose, not all possible PDF
+viewer behavior. Cross-file PDF links depend on the viewer's local-link support;
+the documentation recommends opening the complete collection locally.
+
+OPTIONAL EDITOR: ORDINARY SOURCE AND MATCHING DESIGN DATA
+
+The editor is optional. Its model/generator are separate from the normal main
+application build, SDK and release graph (editor/README.md:13–17).
+Applications adopt only needed visual/ui or visual/flow runtime and retained
+generated headers, plus the existing GUI boundary (editor/README.md:179–182).
+They compile ordinary source and CMake inputs without the authoring editor.
+People and AI coding agents can work directly in the repository's source/build
+files and use ordinary tools; a project can ignore the optional editor entirely.
+
+Agents can also prepare data that the editor understands:
+- schema-1 UTF-8 project.json owns forms, controls, IDs, event references, flows,
+  typed ports/connections and argument-array build/run recipes;
+- file fields navigate to handwritten implementation, header fields include
+  declaration headers, symbol fields name the explicit C++ adapter wrapper;
+- generated_directory and cpp_namespace select the deterministic C++ destination;
+- event wrappers receive services, Ui and typed input; flow factories return an
+  owned Block and handle typed stream buffers; ordinary C/C++/Rust logic lives
+  underneath, with explicit ABI calls and separate compilation rules.
+
+This is compatibility with a documented schema and ordinary source, not automatic
+import of arbitrary handwritten C++ layouts. The Files editor has no C/C++/Rust
+parser; Forms edits the saved design JSON (editor/README.md:128, 152–159).
+The model rejects unknown fields, unsupported versions, duplicate IDs, unsafe
+paths and invalid composition. Exact ports/types and linked declarations matter.
+
+Local review commands from the repository root, using an already built tool:
+  ./build/editor-fltk/foundation-editor-tool validate --project PATH/project.json
+  ./build/editor-fltk/foundation-editor-tool generate --project PATH/project.json
+  ./build/editor-fltk/foundation-editor-tool check-generated --project PATH/project.json
+Run them only on the adopting project's owned files. These are documented recipes
+here; they were not executed against the application checkout by this investigator.
+validate checks design; generate explicitly publishes the changed composition;
+check-generated compares retained outputs. A source-only edit needs recompilation.
+
+The generator is deterministic and local. Regeneration does not rewrite
+handwritten handlers/processing implementations; new-source skeletons are created
+only through explicit new-code actions (editor/generate/README.md:51–55).
+An AI agent's design edits therefore need explicit generation before compilation
+uses the new layout/wiring. Retained headers enable later builds without editor.
+
+LOCAL WORK WHILE AN AI PROVIDER IS UNAVAILABLE
+
+Supported, precise narration:
+"The editor, source files and documentation are local. You can inspect the map,
+adjust the interface, edit code, and build with your prepared tools even while
+a frontier model provider is unavailable. AI coding assistants can later continue
+from those same ordinary sources and compatible design data."
+
+This follows from no AI service in the reader/generator/editor, no network needed
+for the editor build with its documented installed/retained prerequisites, and
+prepared-input normal application builds. A provider outage does not turn a remote
+AI model into a local model. Existing compiler, toolkit/SDK bytes and required
+host display/browser services still supply the project's local tools.
+Evidence: documentation-tool/README.md:12–14, 43–45;
+editor/README.md:21–24, 128, 179–182;
+editor/generate/README.md:3–6, 51–55; docs/offline-builds.md:3–10, 18–33.
+Do not claim every unprepared machine can compile offline without dependencies.
+
+PUBLIC VIDEO WORDING
+
+"This project demonstrates part of the team's work: ordinary C, C++ and Rust
+connected to visual interfaces, source-backed documentation, processing flows,
+portable build inputs, tests and release distribution. These tested practices
+are ready to carry into future projects."
+This presents the demonstrated project as one contribution rather than claiming
+to enumerate all the team's abilities. Keep developer/customer identities and
+personal source narratives out of screen recordings and narration.
+
+PRIMARY REFERENCE FILES
+
+documentation-tool/README.md
+documentation-tool/published/index.html
+documentation-tool/published/explorer.js
+documentation-tool/published/atlas.json
+documentation-tool/published/AI-AUTHORED__GUI-MENTAL-MODEL.html
+documentation-tool/published/pdf/*.pdf
+docs/documentation.md
+docs/offline-builds.md
+editor/README.md
+editor/model/README.md
+editor/generate/README.md

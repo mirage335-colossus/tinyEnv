@@ -1,0 +1,87 @@
+--- web-ticked.hpp
++++ web.hpp
+@@ -232,6 +232,14 @@
+     WebSession(WebAdapter& adapter,std::string epoch,NextService next={},CompleteService complete={},Tick tick={})
+         :adapter_(adapter),epoch_(std::move(epoch)),next_(std::move(next)),complete_(std::move(complete)),tick_(std::move(tick)){
+         if(epoch_.empty()||!valid_utf8(epoch_))throw std::invalid_argument("Invalid session epoch");}
++    // Only the native composition root exposes this to a trusted host pipe.
++    // Ordinary browser messages cannot choose a native pathname.
++    const std::optional<ServiceRequest>& pending_service() const { return service_; }
++    bool complete_host_service(ServiceResult result) {
++        if(adapter_.closed()||!service_||result.id!=service_->id||!complete_)return false;
++        if(!complete_(std::move(result)))return false;
++        service_.reset();upload_.reset();transfer_=web_detail::Json{};return true;
++    }
+     std::string initial(){return response();}
+     std::string receive(std::string_view message){
+         try {const auto input=web_detail::Parser(message).parse();
+@@ -246,31 +254,65 @@
+     }
+ private:
+     WebAdapter& adapter_;std::string epoch_;std::uint64_t ack_=0;NextService next_;CompleteService complete_;Tick tick_;std::optional<ServiceRequest> service_;
++    struct Upload {std::uint64_t id;std::size_t total;std::string bytes;};
++    std::optional<Upload> upload_;
++    web_detail::Json transfer_;
+     std::optional<web_detail::Json> last_presentation_;
+     std::string response(std::string error={}){using namespace web_detail;
+-        if(adapter_.closed())service_.reset();
++        if(adapter_.closed()){service_.reset();upload_.reset();transfer_=Json{};}
+         if(!service_&&next_&&!adapter_.closed()) {service_=next_();if(service_)adapter_.policy().cancel_pointer();}
+         if(service_&&(service_->title.size()>65536||service_->value.size()>65536||service_->byte_limit>65536)){
+             const auto id=service_->id;service_.reset();error="Browser service text/byte limit exceeds 64 KiB";
+             if(complete_)complete_(ServiceResult{id,ServiceStatus::error,{},error});
+         }
+         Json service;
+-        if(service_)service=Json::Object{{"id",std::to_string(service_->id)},{"kind",int(service_->kind)},{"title",service_->title},{"value",service_->value},{"byteLimit",std::to_string(service_->byte_limit)}};
++        if(service_)service=Json::Object{{"id",std::to_string(service_->id)},{"kind",int(service_->kind)},{"title",service_->title},{"value",service_->kind==ServiceKind::write_text?std::string{}:service_->value},{"byteLimit",std::to_string(service_->byte_limit)},{"chunked",true},{"byteSize",std::to_string(service_->value.size())}};
+         try{last_presentation_=adapter_.presentation();}catch(const std::exception& failure){
+             if(!last_presentation_)throw;
+             error=std::string("Presentation failed; previous frame retained: ")+failure.what();
+         }
+         return encode(Json::Object{{"epoch",epoch_},{"ack",std::to_string(ack_)},{"error",std::move(error)},
+-            {"snapshot",*last_presentation_},{"service",std::move(service)}});
++            {"snapshot",*last_presentation_},{"service",std::move(service)},{"transfer",transfer_}});
+     }
+     void dispatch(const web_detail::Json& op){using namespace web_detail;const auto& type=op.at("type").str();
++        transfer_=Json{};
+         if(type=="poll"){if(!adapter_.closed()&&tick_)tick_();return;}
++        if(type=="fileBegin"||type=="fileChunk"||type=="fileFinish"||type=="fileRead") {
++            if(adapter_.closed()||!service_||integer(op.at("id"))!=service_->id)throw std::invalid_argument("Stale file transfer");
++            if(type=="fileRead") {
++                if(service_->kind!=ServiceKind::write_text)throw std::invalid_argument("File request is not an export");
++                const auto offset=integer(op.at("offset"));
++                if(offset>service_->value.size())throw std::out_of_range("Export offset exceeds content");
++                const auto count=std::min<std::size_t>(4096,service_->value.size()-static_cast<std::size_t>(offset));
++                std::string hex;constexpr auto digits="0123456789abcdef";
++                for(std::size_t i=0;i<count;++i){const auto byte=static_cast<unsigned char>(service_->value[static_cast<std::size_t>(offset)+i]);hex+=digits[byte>>4];hex+=digits[byte&15];}
++                transfer_=Json::Object{{"id",std::to_string(service_->id)},{"offset",std::to_string(offset)},{"total",std::to_string(service_->value.size())},{"hex",std::move(hex)}};return;
++            }
++            if(service_->kind!=ServiceKind::read_text)throw std::invalid_argument("File request is not an import");
++            if(type=="fileBegin") {
++                const auto total=integer(op.at("total"));
++                if(total>service_->byte_limit||total>65536)throw std::length_error("Import exceeds byte limit");
++                upload_=Upload{service_->id,static_cast<std::size_t>(total),{}};return;
++            }
++            if(!upload_||upload_->id!=service_->id)throw std::invalid_argument("No active import");
++            if(type=="fileChunk") {
++                const auto offset=integer(op.at("offset"));const auto& hex=op.at("hex").str();
++                if(offset!=upload_->bytes.size()||hex.empty()||hex.size()%2||hex.size()>8192||hex.size()/2>upload_->total-upload_->bytes.size())throw std::invalid_argument("Invalid import chunk order or size");
++                std::string bytes;bytes.reserve(hex.size()/2);
++                const auto digit=[](char c)->unsigned {if(c>='0'&&c<='9')return unsigned(c-'0');if(c>='a'&&c<='f')return unsigned(c-'a'+10);throw std::invalid_argument("Invalid import hex digit");};
++                for(std::size_t i=0;i<hex.size();i+=2)bytes+=static_cast<char>((digit(hex[i])<<4)|digit(hex[i+1]));
++                upload_->bytes+=bytes;return;
++            }
++            if(upload_->bytes.size()!=upload_->total||!valid_utf8(upload_->bytes))throw std::invalid_argument("Incomplete or invalid UTF-8 import");
++            if(!complete_host_service({service_->id,ServiceStatus::success,upload_->bytes,{}}))throw std::invalid_argument("Import completion rejected");
++            return;
++        }
+         if(adapter_.closed())return;
+         if(type=="measure"){if(adapter_.measured(op.at("values")))adapter_.policy().send(ResizeEvent{adapter_.snapshot().client_size,adapter_.snapshot().display_scale});return;}
+         if(type=="service"){if(!service_||integer(op.at("id"))!=service_->id)throw std::invalid_argument("Stale service reply");
+             const auto status=op.at("status").str();ServiceResult result{service_->id,status=="success"?ServiceStatus::success:status=="cancelled"?ServiceStatus::cancelled:ServiceStatus::error,op.at("value").str(),op.at("error").str()};
+             if(!complete_||!complete_(std::move(result)))throw std::invalid_argument("Service reply rejected");
+-            service_.reset();return;}
++            service_.reset();upload_.reset();return;}
+         if(service_&&type!="resize"&&type!="close")return; // Modal service owns user input.
+         if(type=="resize"){const Size size{op.at("width").number(),op.at("height").number()};
+             if(size.width>4096||size.height>4096)throw std::length_error("Browser client size exceeds 4096");

@@ -1,0 +1,8 @@
+Initial application view for seven actual backends.
+Source: 2e33720a73f0686dc1ffe72992dfb52e472cd059
+Run: 37383282720; attempt: 1
+Core provider: rust
+Native: X11, 96 DPI, 640x480 client pixels, scale 1. Browser: 640x480 viewport.
+Terminal: 80x31 cells; status row and border retained. No content edits or image resampling.
+See screenshots.json for exact source, SDK inputs, binaries, runtime and image digests.
+These images do not establish release qualification or permission to redistribute dependencies.

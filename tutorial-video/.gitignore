@@ -1,0 +1,7 @@
+/.work/
+/output/
+/.venv/
+__pycache__/
+*.pyc
+# Optional local narration models; preserve their JSON configuration and notices.
+/assets/voices/*.onnx

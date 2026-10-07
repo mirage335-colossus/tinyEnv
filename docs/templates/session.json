@@ -1,0 +1,31 @@
+{
+  "session": "editor-example",
+  "identity": {
+    "Tool / host / local chat reference": "REPLACE with harness, host and local chat reference",
+    "Parent / read-only helpers": "none",
+    "Task and approach": "REPLACE with complete requested change, research, implementation, verification and delivery",
+    "Checkout / coordination root (absolute physical paths)": "REPLACE with agreed absolute checkout and board paths",
+    "Branch / starting HEAD / current HEAD": "REPLACE with inspected branch and revisions",
+    "Starting worktree and index changes (including work owned by others)": "REPLACE with actual baseline and ownership disposition"
+  },
+  "checkpoint": {
+    "State": "active",
+    "Updated (UTC)": "REPLACE_PUBLICATION_TIME",
+    "Last meaningful progress (UTC)": "unavailable",
+    "Last inbox check (UTC)": "unavailable",
+    "Next check (UTC) / action": "REPLACE_NEXT_CHECK / inspect inbox and continue the declared task",
+    "Liveness mode / cadence": "checkpoint / five minutes",
+    "Last heartbeat (UTC), if supervised": "none",
+    "Run token / heartbeat file and writer, if used": "none",
+    "Owner process": "unavailable; a transient tool PID is not the session worker",
+    "Running jobs": "none",
+    "Closed (UTC), if terminal": "none",
+    "Delete after (UTC)": "none",
+    "Retention exception": "none",
+    "Contact": "messages/editor-example/"
+  },
+  "claims": [],
+  "baseline": "- REPLACE with observed revision, relevant dirty input digests/identity, read dependencies, shared invariants and integration order.",
+  "progress": "- REPLACE with actual current progress and checks, including omitted or pending coverage.",
+  "handoff": "- Scope inventory: complete\n- Scope: none\n- No pending handoffs."
+}

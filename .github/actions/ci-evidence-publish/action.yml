@@ -1,0 +1,61 @@
+name: Retain bounded CI evidence
+description: Keep bounded native handoffs for one day without redundant REST provenance requests.
+inputs:
+  name:
+    description: Exact existing CI bundle name.
+    required: true
+  paths:
+    description: Newline-separated repository-relative paths, using the existing bundle layout.
+    required: true
+  slot:
+    description: Certification matrix index; indices above 47 require an explicitly selected alternative.
+    required: false
+    default: ''
+  producer-status:
+    description: Executing job outcome before artifact publication; qualification consumers require success.
+    required: false
+    default: ${{ job.status }}
+  allow-release-fallback:
+    description: Explicitly use legacy release transport on native size or service failure.
+    required: false
+    default: 'false'
+outputs:
+  artifact-id:
+    description: Exact immutable upload ID for deletion after its final consumer.
+    value: ${{ steps.upload.outputs.artifact-id }}
+runs:
+  using: composite
+  steps:
+    - id: prepare
+      if: always()
+      shell: python
+      env:
+        BUNDLE_NAME: ${{ inputs.name }}
+        BUNDLE_PATHS: ${{ inputs.paths }}
+        ARTIFACT_SLOT: ${{ inputs.slot }}
+        ARTIFACT_PRODUCER_STATUS: ${{ inputs.producer-status }}
+        FOUNDATION_CI_ARTIFACT_RELEASE_FALLBACK: ${{ inputs.allow-release-fallback }}
+      run: |
+        import subprocess, sys
+        subprocess.run([sys.executable, '-B', 'tools/ci_artifacts.py', 'prepare'], check=True)
+    - id: upload
+      if: always() && steps.prepare.outputs.transport == 'actions'
+      continue-on-error: ${{ inputs.allow-release-fallback == 'true' }}
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: ${{ steps.prepare.outputs.artifact-name }}
+        path: ${{ steps.prepare.outputs.path }}/*
+        if-no-files-found: error
+        retention-days: 1
+        compression-level: 0
+        overwrite: false
+    - name: Retain complete evidence through release storage when necessary
+      if: always() && inputs.allow-release-fallback == 'true' && (steps.prepare.outputs.transport == 'release' || steps.upload.outcome == 'failure')
+      shell: python
+      env:
+        BUNDLE_NAME: ${{ inputs.name }}
+        BUNDLE_PATHS: ${{ inputs.paths }}
+        FOUNDATION_CI_ARTIFACT_RELEASE_FALLBACK: ${{ inputs.allow-release-fallback }}
+      run: |
+        import subprocess, sys
+        subprocess.run([sys.executable, '-B', 'tools/ci_artifacts.py', 'fallback'], check=True)

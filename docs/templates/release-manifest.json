@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "source": {
+    "path": "replace-with-exact-source-archive.tar.gz",
+    "sha256": "replace-with-source-archive-sha256"
+  },
+  "artifacts": [
+    {
+      "path": "replace-with-application-archive.tar.gz",
+      "sha256": "replace-with-application-archive-sha256",
+      "manifest_path": "replace-with-application-archive.tar.gz.json",
+      "target": "linux-x86_64",
+      "backends": [],
+      "sdk_recipe": "replace-with-complete-sdk-recipe-sha256",
+      "dependency_recipes": [
+        "replace-with-complete-sdk-recipe-sha256"
+      ]
+    }
+  ],
+  "required_scopes": [
+    "source",
+    "archive",
+    "recovery",
+    "abi"
+  ]
+}

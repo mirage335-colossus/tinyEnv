@@ -1,0 +1,74 @@
+--- include/gui/memory_adapter.hpp
++++ include/gui/memory_adapter.hpp
+@@ -69,8 +69,16 @@
+             const auto a=resolve_availability(next,entries,entry.spec.key);
+             if(!a.visible||!a.enabled)entry.popup.reset();
+         }
++        const bool revoke_pointer=snapshot_.client_size!=next.client_size||snapshot_.display_scale!=next.display_scale||snapshot_.active_page!=next.active_page||snapshot_.modal_root!=next.modal_root;
+         snapshot_=std::move(next);entries_=std::move(entries);
++        if(revoke_pointer)pointer_capture_.reset();
+         generations_=std::move(generations);focus_=std::move(focus);
++        if(pointer_capture_) {
++            const auto area=resolve_availability(snapshot_,entries_,pointer_capture_->target);
++            if(!find_widget(snapshot_,pointer_capture_->target)||!area.visible||!area.enabled||
++                !contains(area.clip,pointer_capture_->origin))
++                pointer_capture_.reset();
++        }
+     }
+     const Snapshot& snapshot() const {require_thread();return snapshot_;}
+     Size measure_text(const TextMeasureRequest& request) const override {
+@@ -160,7 +168,7 @@
+         if(w->spec.kind==Kind::text&&w->spec.text_policy.read_only)return false;
+         const auto& options=actions?w->state.actions:w->state.options;
+         if(options.empty())return false;
+-        at(key).popup=options;return true;
++        pointer_capture_.reset();at(key).popup=options;return true;
+     }
+     Delivery choose_popup(const WidgetKey& key,std::size_t index) {
+         require_mutable();auto found=entries_.find(key.id);
+@@ -198,11 +206,27 @@
+         }
+         return Delivery::ignored;
+     }
++    void cancel_pointer() {require_mutable();pointer_capture_.reset();}
+     // Entry point used by a native callback after translating its input.
+     Delivery send(Event event) {
+         require_thread();require_not_painting();if(closed_||dispatching_)return Delivery::ignored;
++        // One shared owner gate serves raw browser, SDL and embedded surfaces.
++        // Establish/reset before dispatch: a synchronous sink can replace state.
++        if(auto* widget=std::get_if<WidgetEvent>(&event))if(auto* pointer=std::get_if<PointerInput>(&widget->input)) {
++            const bool ending=pointer->kind==PointerKind::release||pointer->kind==PointerKind::cancel;
++            if(pointer->kind==PointerKind::press) {
++                if(pointer_capture_||pointer->pointer_id==0)return Delivery::ignored;
++            } else if(ending||(pointer->kind==PointerKind::move&&pointer->pointer_id!=0)) {
++                if(!pointer_capture_||pointer_capture_->target!=widget->target||
++                    pointer_capture_->owner!=pointer->pointer_id)return Delivery::ignored;
++                if(ending)pointer_capture_.reset();
++            } else if(pointer_capture_)return Delivery::ignored;
++        }
+         const bool accepted=normalize_event(snapshot_,event,[&](const WidgetKey& group){return at(group).offset;});
+         if(!accepted||!sink_)return Delivery::ignored;
++        if(std::holds_alternative<ResizeEvent>(event))pointer_capture_.reset();
++        if(const auto* widget=std::get_if<WidgetEvent>(&event))if(const auto* pointer=std::get_if<PointerInput>(&widget->input))
++            if(pointer->kind==PointerKind::press)pointer_capture_=PointerCapture{widget->target,pointer->pointer_id,pointer->position};
+         struct Guard {bool& flag;explicit Guard(bool& f):flag(f){flag=true;}~Guard(){flag=false;}} guard(dispatching_);
+         auto callback=sink_;callback(event);return Delivery::delivered;
+     }
+@@ -241,7 +265,7 @@
+     }
+     bool closed() const override {require_thread();return closed_;}
+     void close() override {
+-        require_thread();require_not_painting();closed_=true;sink_={};focus_.reset();entries_.clear();snapshot_={};
++        require_thread();require_not_painting();closed_=true;sink_={};focus_.reset();pointer_capture_.reset();entries_.clear();snapshot_={};
+     }
+ private:
+     struct Entry {
+@@ -258,6 +282,8 @@
+     Snapshot snapshot_;
+     std::map<std::string,Entry,std::less<>> entries_;
+     std::map<std::string,std::uint64_t,std::less<>> generations_;
++    struct PointerCapture {WidgetKey target;std::uint64_t owner;Point origin;};
++    std::optional<PointerCapture> pointer_capture_;
+     std::optional<WidgetKey> focus_;
+     bool closed_=false,dispatching_=false,painting_=false;
+     mutable bool measuring_=false;

@@ -1,0 +1,35 @@
+Software Foundation — build and run the optional graphical editor
+
+Run from the repository root on a Linux desktop with a working display.
+Rust is not required to build the editor.
+
+Compile and run with the retained native Linux C++ SDK in this checkout:
+./build.sh editor build dev --backend fltk --sdk build/agents/rust-package-qualification/sdk --build-dir build/editor-fltk-sdk
+./build/editor-fltk-sdk/foundation-editor-fltk
+
+Substitute your verified native SDK path if stored elsewhere; this path is not auto-selected.
+Use a fresh build directory when switching between SDK and system builds.
+
+System-toolchain alternative: Git, CMake >=3.24, Ninja, Python >=3.9, C++20 and FLTK.
+Debian 12 preparation, if needed:
+sudo apt-get install git build-essential cmake ninja-build python3 libfltk1.3-dev
+./build.sh editor build dev --backend fltk --build-dir build/editor-fltk
+./build/editor-fltk/foundation-editor-fltk
+
+Choose Examples, then Simple C, Simple C++, Rust DSP, or Advanced MIMO.
+Start with the simple form and Source -> Gain -> Collector flow, or launch it directly:
+./build/editor-fltk-sdk/foundation-editor-fltk --project editor/examples/simple-c/project.json
+Examples are editable; Save updates the chosen example's files.
+Choose New or Open, paste the directory or JSON path, and press Enter; Escape cancels.
+New form/flow asks for its name; Rename beside the document picker changes it later.
+Drag a flow block by its body; click or drag between output and input port names/sockets.
+Escape or Cancel link cancels wiring. Flows fit automatically; Fit restores the whole view.
+Double-click a widget or flow block to edit its ordinary source file.
+Enter applies property edits or opens the typed file path. F3 saves; F2 edits selected code.
+To open the editor's own design, append --project editor/self/project.json --root .
+
+Framebuffers use the existing SDL2 display/input host: install libsdl2-dev,
+then use --backend framebuffer and build/editor-framebuffer; run foundation-editor-framebuffer.
+Rev uses --backend rev and build/editor-rev; its existing prepared module toolchain is required.
+Commands use retained GUI inputs and download nothing. Rebuild after editing source.
+Details, local tests, recipes and platform limits: editor/README.md.

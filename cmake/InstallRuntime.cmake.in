@@ -1,0 +1,14 @@
+# DESTDIR is part of the installation path; target dependencies are never host-searched.
+set(_runtime_command "@Python3_EXECUTABLE@" "@CMAKE_SOURCE_DIR@/tools/package_runtime.py"
+    --prefix "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}" --processor "@_portable_processor@")
+set(_runtime_roots "@FOUNDATION_RUNTIME_ROOTS@")
+foreach(_root IN LISTS _runtime_roots)
+  list(APPEND _runtime_command --root "${_root}")
+endforeach()
+if(NOT "@FOUNDATION_SDK_ROOT@" STREQUAL "")
+  list(APPEND _runtime_command --bookworm --elf-editor "@FOUNDATION_SDK_ROOT@/bin/patchelf")
+endif()
+execute_process(COMMAND ${_runtime_command} RESULT_VARIABLE _runtime_result)
+if(NOT _runtime_result EQUAL 0)
+  message(FATAL_ERROR "Private runtime staging or compatibility verification failed")
+endif()

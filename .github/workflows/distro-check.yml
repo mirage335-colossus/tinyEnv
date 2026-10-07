@@ -1,0 +1,155 @@
+name: Native signed package install and update
+'on':
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Exact JSON containing tag, manifest_sha256 and target
+        type: string
+        required: true
+      previous:
+        description: Optional older exact channel JSON for an actual version upgrade
+        type: string
+        default: ''
+      distro:
+        description: Native frontend to diagnose; full acceptance requires all
+        type: choice
+        options: [all, apt, arch, gentoo]
+        default: all
+      accept:
+        description: Mark this immutable channel qualified after every required native check
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      channel:
+        type: string
+        required: true
+      previous:
+        type: string
+        default: ''
+      distro:
+        type: string
+        default: all
+      accept:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  actions: read
+env:
+  GH_TOKEN: ${{ github.token }}
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+  CHANNEL: ${{ inputs.channel }}
+  PREVIOUS: ${{ inputs.previous }}
+  DISTRO: ${{ inputs.distro || 'all' }}
+  ACCEPT_CHANNEL: ${{ inputs.accept }}
+  TRUSTED_FINGERPRINT: ${{ vars.DISTRIBUTION_SIGNING_FINGERPRINT }}
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - id: plan
+      shell: python
+      run: |
+        import json, os, sys
+        from pathlib import Path
+        sys.path.insert(0, 'tools')
+        import distro_check
+        value = distro_check.selection(os.environ['CHANNEL'])
+        if os.environ['PREVIOUS']:
+            previous = distro_check.selection(os.environ['PREVIOUS'])
+            if previous['target'] != value['target']:
+                raise ValueError('upgrade target differs')
+        with Path(os.environ['GITHUB_OUTPUT']).open('a') as stream:
+            stream.write('matrix=' + json.dumps(distro_check.matrix(value['target'], os.environ['DISTRO'], accept=os.environ['ACCEPT_CHANNEL'] == 'true')) + '\n')
+  install:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    # Upgrades preserve two complete native installation rounds; SDK recovery is separate.
+    timeout-minutes: ${{ matrix.kind == 'gentoo' && inputs.previous != '' && 180 || 90 }}
+    permissions:
+      contents: write
+      actions: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Fetch signed native channel bytes and reconcile the complete release inventory
+      shell: python
+      run: |
+        import os, sys
+        from pathlib import Path
+        sys.path.insert(0, 'tools')
+        import distro_check as check
+        for name, raw in [('current', os.environ['CHANNEL']), ('previous', os.environ['PREVIOUS'])]:
+            if not raw: continue
+            item = check.selection(raw)
+            value = check.release.fetch(os.environ['GITHUB_REPOSITORY'], item['tag'], item['manifest_sha256'],
+                Path('build/channels')/name, Path('docs/release-policy.json'), os.environ['TRUSTED_FINGERPRINT'], native_only=True,
+                reuse=Path('build/channels/current') if name == 'previous' else None)
+            if value['request']['target'] != item['target']:
+                raise ValueError('fetched target differs')
+    - name: Install the job-owned external display service from the runner distribution
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends xvfb xauth x11-utils
+    - name: Run native package frontend in an isolated disposable system
+      shell: python
+      env:
+        CHECK_ID: ${{ matrix.id }}
+        CHECK_IMAGE: ${{ matrix.image }}
+        CHECK_KIND: ${{ matrix.kind }}
+      run: |
+        import os, sys
+        from pathlib import Path
+        sys.path.insert(0, 'tools')
+        import distro_check
+        distro_check.container(Path.cwd(), os.environ['CHECK_ID'], os.environ)
+    - if: always()
+      name: Retain complete native client evidence without Actions artifact storage
+      run: python .github/scripts/lifecycle.py bundle-store
+      env:
+        BUNDLE_NAME: distro-${{ matrix.id }}-${{ github.run_attempt }}
+        BUNDLE_PATHS: build/distro-evidence/
+  accept:
+    if: ${{ inputs.accept }}
+    needs: [plan, install]
+    runs-on: ubuntu-24.04
+    environment: release-publisher
+    permissions:
+      contents: write
+      actions: read
+    concurrency:
+      group: foundation-release-lifecycle
+      cancel-in-progress: false
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Verify all native receipts and mark channel eligible for tracked updates
+      shell: python
+      run: |
+        import os, sys
+        from pathlib import Path
+        sys.path.insert(0, 'tools')
+        import distro_check as check
+        import ci_plan
+        request = check.selection(os.environ['CHANNEL'])
+        records = []
+        workflow = os.environ['GITHUB_WORKFLOW_REF'].split('/.github/workflows/',1)[1].split('@',1)[0]
+        for row in check.matrix(request['target'])['include']:
+            root = Path('build/distro-results')/row['id']
+            ci_plan.restore_run_bundle(os.environ['GITHUB_REPOSITORY'], int(os.environ['GITHUB_RUN_ID']),
+                int(os.environ['GITHUB_RUN_ATTEMPT']), os.environ['GITHUB_SHA'], workflow,
+                'distro-'+row['id']+'-'+os.environ['GITHUB_RUN_ATTEMPT'], root)
+            records.append(check.release.archive.read_json(root/'native/result.json'))
+        check.accept(request, records, os.environ, Path('build/accepted-channel'))

@@ -1,0 +1,420 @@
+name: Prepared SDK application and candidate
+'on':
+  workflow_dispatch:
+    inputs:
+      core_provider:
+        description: Application provider; cpp explicitly selects legacy compatibility
+        type: choice
+        options: [rust, cpp]
+        default: rust
+      preserve_artifacts:
+        description: Keep temporary handoffs and diagnostics for one day after completion
+        type: boolean
+        default: false
+      profile:
+        description: Exact release inventory
+        type: choice
+        options:
+        - core
+        - all-gui
+        default: core
+      recipes:
+        description: JSON target-to-recipe map; every selected target is mandatory
+        type: string
+        required: true
+      tag:
+        description: Optional new candidate tag
+        type: string
+        required: false
+      experiment:
+        description: Keep this candidate a prerelease and ineligible for Latest
+        type: boolean
+        default: true
+      linux_pool:
+        description: Standard or explicitly configured faster runners for every platform
+        type: choice
+        options: [standard, faster]
+        default: standard
+      jobs:
+        description: Auto uses available CPU and RAM; explicit compile override
+        type: choice
+        options:
+        - auto
+        - '2'
+        - '4'
+        - '8'
+        default: auto
+      require_regression:
+        description: Run full candidate regression alongside production and require it before assembly
+        type: boolean
+        default: false
+      package_repository:
+        description: Include signed native repositories before freezing the candidate inventory
+        type: boolean
+        default: false
+      package_release:
+        description: Native package revision, 1 through 999999; increase for each package update
+        type: string
+        default: ''
+      execute:
+        description: Publish candidate after exact local verification
+        type: boolean
+        default: false
+      graphics_archive_url:
+        description: Operator-retained HTTPS host graphics archive; required for Windows all-gui
+        type: string
+        default: ''
+      gui_group:
+        description: Exact retained GUI manifest SHA-256 for all-gui; empty for core
+        type: string
+        required: false
+  workflow_call:
+    inputs:
+      core_provider:
+        description: Application provider; cpp explicitly selects legacy compatibility
+        type: string
+        default: rust
+      preserve_artifacts:
+        description: Keep temporary handoffs and diagnostics for one day after completion
+        type: boolean
+        default: false
+      profile:
+        description: Exact release inventory
+        type: string
+        default: core
+      recipes:
+        description: JSON target-to-recipe map; every selected target is mandatory
+        type: string
+        required: true
+      tag:
+        description: Optional new candidate tag
+        type: string
+        required: true
+      experiment:
+        description: Keep this candidate a prerelease and ineligible for Latest
+        type: boolean
+        default: false
+      linux_pool:
+        description: Standard or explicitly configured faster runners for every platform
+        type: string
+        default: standard
+      jobs:
+        description: Auto uses available CPU and RAM; explicit compile override
+        type: string
+        default: auto
+      require_regression:
+        description: Run full candidate regression alongside production and require it before assembly
+        type: boolean
+        default: false
+      package_repository:
+        description: Include signed native repositories before freezing the candidate inventory
+        type: boolean
+        default: false
+      package_release:
+        description: Native package revision, 1 through 999999; increase for each package update
+        type: string
+        default: ''
+      execute:
+        description: Publish candidate after exact local verification
+        type: boolean
+        default: false
+      graphics_archive_url:
+        description: Operator-retained HTTPS host graphics archive; required for Windows all-gui
+        type: string
+        default: ''
+      gui_group:
+        description: Exact retained GUI manifest SHA-256 for all-gui; empty for core
+        type: string
+        required: false
+    secrets:
+      DISTRIBUTION_SIGNING_KEY:
+        description: Optional caller input; the protected job environment supplies the signing key
+        required: false
+    outputs:
+      tag:
+        description: Verified tag
+        value: ${{ jobs.assemble.outputs.tag }}
+      inventory_sha256:
+        description: Verified inventory sha256
+        value: ${{ jobs.assemble.outputs.inventory_sha256 }}
+      source_commit:
+        description: Verified source commit
+        value: ${{ jobs.assemble.outputs.source_commit }}
+      delivery_sha256:
+        description: Verified delivery sha256
+        value: ${{ jobs.assemble.outputs.delivery_sha256 }}
+      published:
+        description: Verified published
+        value: ${{ jobs.assemble.outputs.published || 'false' }}
+      regression_result:
+        description: Result of the required nested full candidate workflow, or skipped for standalone production
+        value: ${{ jobs.assemble.outputs.regression_result }}
+permissions:
+  contents: read
+  actions: read
+jobs:
+  regression:
+    name: Full candidate regression overlapping application production
+    needs: prepare
+    if: inputs.require_regression
+    permissions:
+      contents: write
+      actions: write
+    uses: ./.github/workflows/candidate.yml
+    with:
+      devfast: false
+      include_arm: true
+      linux_pool: ${{ inputs.linux_pool }}
+      build_jobs: ${{ inputs.jobs }}
+      preserve_artifacts: ${{ inputs.preserve_artifacts }}
+      core_provider: ${{ inputs.core_provider }}
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      source_artifact_id: ${{ steps.source_bundle.outputs.artifact-id }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - shell: python
+      run: |-
+        import subprocess, sys
+        subprocess.run([sys.executable, '.github/scripts/lifecycle.py', 'application-plan'], check=True)
+      id: plan
+      env:
+        RECIPES: ${{ inputs.recipes }}
+        LINUX_POOL: ${{ inputs.linux_pool }}
+        FOUNDATION_FASTER_LINUX_RUNNER: ${{ vars.FOUNDATION_FAST_LINUX_RUNNER }}
+        FOUNDATION_FASTER_ARM_RUNNER: ${{ vars.FOUNDATION_FAST_ARM_RUNNER }}
+        FOUNDATION_FASTER_WINDOWS_RUNNER: ${{ vars.FOUNDATION_FAST_WINDOWS_RUNNER }}
+    - id: source_bundle
+      name: Retain source for the parallel application producers
+      uses: ./.github/actions/ci-evidence-publish
+      with:
+        name: source-${{ github.run_attempt }}
+        paths: |-
+          build/source.tar.gz
+          build/recipes.json
+          build/rust-recipes.json
+    permissions:
+      contents: write
+      actions: read
+  application:
+    needs: prepare
+    outputs:
+      linux_x86_64: ${{ matrix.target == 'linux-x86_64' && steps.application_bundle.outputs.artifact-id || '' }}
+      linux_aarch64: ${{ matrix.target == 'linux-aarch64' && steps.application_bundle.outputs.artifact-id || '' }}
+      windows_x86_64: ${{ matrix.target == 'windows-x86_64' && steps.application_bundle.outputs.artifact-id || '' }}
+      browser_wasm32: ${{ matrix.target == 'browser-wasm32' && steps.application_bundle.outputs.artifact-id || '' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    env:
+      TARGET: ${{ matrix.target }}
+      RECIPE: ${{ matrix.recipe }}
+      CORE_PROVIDER: ${{ matrix.core_provider }}
+      FOUNDATION_PROVIDER_RECIPE: ${{ matrix.rust_recipe }}
+      JOBS: ${{ inputs.jobs }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Download source from this successful preparation
+      uses: ./.github/actions/ci-evidence-download
+      with:
+        pattern: source
+    - shell: python
+      run: |
+        import subprocess,sys
+        subprocess.run([sys.executable,'.github/scripts/lifecycle.py','bundle-fetch'],check=True)
+      env:
+        BUNDLE_NAME: source-${{ github.run_attempt }}
+        BUNDLE_OUTPUT: build/source
+    - shell: python
+      run: |-
+        import subprocess, sys
+        subprocess.run([sys.executable, '.github/scripts/lifecycle.py', 'fetch-sdk-binary'], check=True)
+      name: Fetch exact verified binary SDK and paired checksum; never cold-build
+    - name: Restore the exact complete retained Rust extension
+      if: inputs.core_provider == 'rust'
+      run: python .github/scripts/lifecycle.py fetch-rust-sdk
+    - name: Verify explicitly retained Windows host graphics input
+      if: runner.os == 'Windows' && inputs.profile == 'all-gui'
+      run: python .github/scripts/lifecycle.py graphics-input
+    - if: runner.os == 'Windows'
+      shell: pwsh
+      run: ./tools/ci_windows.ps1
+    - shell: python
+      run: |-
+        import subprocess, sys
+        subprocess.run([sys.executable, '.github/scripts/lifecycle.py', 'application-build'], check=True)
+      if: runner.os == 'Windows'
+    - shell: python
+      run: |
+        import subprocess, sys
+        subprocess.run([sys.executable, '.github/scripts/container_job.py', 'application-build'], check=True)
+      if: runner.os == 'Linux'
+    - id: application_bundle
+      name: Retain the successfully built application
+      uses: ./.github/actions/ci-evidence-publish
+      with:
+        name: application-${{ matrix.target }}-${{ github.run_attempt }}
+        paths: |-
+          build/produced/*.tar.gz
+          build/produced/*.zip
+          build/produced/*.json
+    - if: always()
+      name: Retain application diagnostics including failures
+      uses: ./.github/actions/ci-evidence-publish
+      with:
+        name: application-evidence-${{ matrix.target }}-${{ github.run_attempt }}
+        paths: |-
+          ${{ job.status == 'failure' && 'build/receipts/failure.json' || '' }}
+          build/produced/source.junit.xml
+          build/produced/work/build/Testing/Temporary/
+          build/produced/work/build/test-reports/
+          build/produced/graphics.json
+          build/produced/graphics-probe.json
+          build/produced/graphics-test.log
+          build/produced/graphics-compile.log
+          build/produced/graphics-qualification.json
+          build/produced/work/build/gui/visual-evidence/**/*.json
+          build/produced/work/build/gui/visual-evidence/**/*.png
+          build/produced/work/build/gui/visual-evidence/**/*.ppm
+          build/produced/work/build/gui/visual-evidence/**/*.log
+    permissions:
+      contents: write
+      actions: read
+  assemble:
+    name: Verify complete candidate and publish directly after required regression
+    if: ${{ always() && needs.prepare.result == 'success' && needs.application.result == 'success' && ((inputs.require_regression && needs.regression.result == 'success') || (!inputs.require_regression && needs.regression.result == 'skipped')) }}
+    needs: [prepare, application, regression]
+    runs-on: ubuntu-24.04
+    environment: ${{ (inputs.execute || inputs.package_repository) && 'release-publisher' || '' }}
+    concurrency:
+      group: foundation-release-lifecycle
+      cancel-in-progress: false
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Download successful source and application handoffs
+      uses: ./.github/actions/ci-evidence-download
+      with:
+        pattern: '{source,application-linux-*,application-windows-*,application-browser-*}'
+    - name: Restore source and all required application producers together
+      shell: python
+      env:
+        RECIPES: ${{ inputs.recipes }}
+      run: |
+        import subprocess,sys
+        subprocess.run([sys.executable,'.github/scripts/lifecycle.py','fetch-assembly-inputs'],check=True)
+    - name: Install native package and signing tools
+      if: inputs.package_repository
+      run: sudo sh tools/ci-apt.sh install dpkg-dev gnupg gpgv binutils
+    - shell: python
+      env:
+        SIGNING_PRIVATE_KEY: ${{ inputs.package_repository && secrets.DISTRIBUTION_SIGNING_KEY || '' }}
+        TRUSTED_FINGERPRINT: ${{ vars.DISTRIBUTION_SIGNING_FINGERPRINT }}
+      run: |-
+        import os, subprocess, sys, tempfile
+        from pathlib import Path
+        # Never expose private key material to package tools or other subprocesses.
+        private = os.environ.pop('SIGNING_PRIVATE_KEY')
+        if os.environ['PACKAGE_REPOSITORY'] == 'true':
+            if not private or len(private.encode()) > 1024 * 1024:
+                raise ValueError('bounded protected distribution signing key required')
+            with tempfile.TemporaryDirectory(prefix='foundation-private-key-', dir=os.environ['RUNNER_TEMP']) as temporary:
+                key = Path(temporary) / 'private.asc'
+                key.write_text(private); key.chmod(0o600)
+                del private
+                subprocess.run([sys.executable, '.github/scripts/lifecycle.py', 'assemble'], check=True,
+                    env=dict(os.environ, PACKAGE_SIGNING_KEY=str(key)))
+        else:
+            subprocess.run([sys.executable, '.github/scripts/lifecycle.py', 'assemble'], check=True)
+      id: result
+    - if: ${{ !inputs.execute }}
+      name: Retain candidate preparation controls without duplicating SDK archives
+      uses: ./.github/actions/ci-evidence-publish
+      with:
+        name: candidate-${{ github.run_attempt }}
+        paths: |-
+          build/candidate/release.json
+          build/delivery.json
+          build/publication-request.json
+          build/publication-plan.json
+    - if: inputs.execute
+      name: Publish verified local candidate without a full bundle round trip
+      run: python .github/scripts/lifecycle.py publish-candidate
+      id: publication
+    - if: always() && inputs.execute
+      name: Retain candidate publication receipt
+      uses: ./.github/actions/ci-evidence-publish
+      with:
+        name: candidate-delivery-${{ github.run_attempt }}
+        paths: build/receipts/
+    - name: Select all consumed source and application artifact IDs
+      id: cleanup_inputs
+      if: success() && inputs.execute && !inputs.preserve_artifacts && steps.publication.outputs.published == 'true'
+      continue-on-error: true
+      shell: python
+      env:
+        APPLICATION_MATRIX: ${{ needs.prepare.outputs.matrix }}
+        APPLICATION_ARTIFACT_IDS: ${{ toJSON(needs.application.outputs) }}
+        SOURCE_ARTIFACT_ID: ${{ needs.prepare.outputs.source_artifact_id }}
+      run: |
+        import json, os, re
+        matrix = json.loads(os.environ['APPLICATION_MATRIX'])['include']
+        targets = [row['target'] for row in matrix]
+        allowed = {'linux-x86_64', 'linux-aarch64', 'windows-x86_64', 'browser-wasm32'}
+        if not targets or len(targets) != len(set(targets)) or not set(targets) <= allowed:
+            raise SystemExit('Invalid application matrix; preserve all temporary artifacts')
+        expected = {target.replace('-', '_') for target in targets}
+        ids = json.loads(os.environ['APPLICATION_ARTIFACT_IDS'])
+        if set(ids) != expected:
+            raise SystemExit('Incomplete application artifact IDs; preserve all temporary artifacts')
+        selected = [os.environ['SOURCE_ARTIFACT_ID']] + [ids[key] for key in sorted(expected)]
+        if len(selected) != len(set(selected)) or any(not isinstance(value, str) or not re.fullmatch(r'[1-9][0-9]{0,19}', value) for value in selected):
+            raise SystemExit('Invalid artifact IDs; preserve all temporary artifacts')
+        with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+            output.write('ids=' + json.dumps(selected) + '\n')
+    - name: Remove source and application handoffs after verified publication
+      if: success() && inputs.execute && !inputs.preserve_artifacts && steps.cleanup_inputs.outcome == 'success'
+      uses: ./.github/actions/ci-artifact-cleanup
+      continue-on-error: true
+      timeout-minutes: 1
+      with:
+        artifact-ids: ${{ steps.cleanup_inputs.outputs.ids }}
+    - name: Confirm complete workflow cleanup eligibility
+      if: success() && inputs.execute && inputs.require_regression && !inputs.preserve_artifacts
+      run: echo 'Full candidate publication passed; preceding full-run temporary evidence may be pruned after this run completes.'
+    permissions:
+      contents: write
+      actions: write
+    outputs:
+      regression_result: ${{ needs.regression.result }}
+      published: ${{ steps.publication.outputs.published }}
+      tag: ${{ steps.result.outputs.tag }}
+      inventory_sha256: ${{ steps.result.outputs.inventory_sha256 }}
+      source_commit: ${{ steps.result.outputs.source_commit }}
+      delivery_sha256: ${{ steps.result.outputs.delivery_sha256 }}
+
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+  CORE_PROVIDER: ${{ inputs.core_provider }}
+  PROFILE: ${{ inputs.profile }}
+  EXPERIMENT: ${{ inputs.experiment }}
+  TAG: ${{ inputs.tag }}
+  GUI_GROUP: ${{ inputs.gui_group }}
+  GRAPHICS_ARCHIVE_URL: ${{ inputs.graphics_archive_url }}
+  PACKAGE_REPOSITORY: ${{ inputs.package_repository }}
+  PACKAGE_RELEASE: ${{ inputs.package_release }}
+concurrency:
+  group: prepared-application-${{ github.ref }}-${{ inputs.profile }}
+  cancel-in-progress: false

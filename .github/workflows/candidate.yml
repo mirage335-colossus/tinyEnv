@@ -1,0 +1,310 @@
+name: Candidate checks
+permissions:
+  contents: read
+env:
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+  GH_TOKEN: ${{ github.token }}
+concurrency:
+  group: candidate-${{ github.ref }}-${{ inputs.devfast }}-${{ inputs.linux_pool }}-${{ inputs.include_arm }}
+  cancel-in-progress: true
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      checks: ${{ steps.plan.outputs.checks }}
+      packages: ${{ steps.plan.outputs.packages }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - id: plan
+      env:
+        DEVFAST: ${{ inputs.devfast }}
+        CORE_PROVIDER: ${{ inputs.core_provider }}
+        ARM: ${{ inputs.include_arm }}
+        POOL: ${{ inputs.linux_pool }}
+        FAST: ${{ vars.FOUNDATION_FAST_LINUX_RUNNER }}
+        FAST_ARM: ${{ vars.FOUNDATION_FAST_ARM_RUNNER }}
+        FAST_WINDOWS: ${{ vars.FOUNDATION_FAST_WINDOWS_RUNNER }}
+      shell: python
+      run: |
+        import os, subprocess, sys
+        if os.environ['CORE_PROVIDER'] not in ('rust', 'cpp'):
+            raise SystemExit('Unknown application provider')
+        command = [sys.executable, 'tools/ci_plan.py', 'plan', '--pool', os.environ['POOL'],
+                   '--configured', os.environ['FAST'], '--configured-arm', os.environ['FAST_ARM'],
+                   '--configured-windows', os.environ['FAST_WINDOWS'], '--github-output', os.environ['GITHUB_OUTPUT']]
+        if os.environ['DEVFAST'] == 'true': command.append('--devfast')
+        if os.environ['ARM'] != 'true': command.append('--no-arm')
+        subprocess.run(command, check=True)
+  source:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.checks) }}
+    runs-on: ${{ matrix.runner }}
+    name: Source ${{ matrix.target }} / ${{ matrix.scope }}
+    timeout-minutes: 30
+    env:
+      BUILD_JOBS: ${{ inputs.build_jobs }}
+      CTEST_PARALLEL_LEVEL: '2'
+      TARGET: ${{ matrix.target }}
+      SCOPE: ${{ matrix.scope }}
+      CORE_PROVIDER: ${{ inputs.core_provider }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Resolve compile capacity
+      shell: python
+      run: |
+        import os, sys
+        sys.path.insert(0, 'tools')
+        from build_capacity import compile_jobs
+        jobs = compile_jobs(os.environ['BUILD_JOBS'])
+        with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as output:
+            output.write('CMAKE_BUILD_PARALLEL_LEVEL=' + str(jobs) + '\n')
+    - if: runner.os == 'Windows'
+      shell: pwsh
+      run: ./tools/ci_windows.ps1
+    - name: Explicit pinned native Rust host preparation
+      if: inputs.core_provider == 'rust'
+      shell: python
+      run: |
+        import os, subprocess, sys
+        from pathlib import Path
+        subprocess.run([sys.executable, '-B', '.github/scripts/rust_host_prepare.py',
+                        '--target', os.environ['TARGET']], check=True)
+        retained = Path('build/release/native-rust-preparation.json')
+        retained.parent.mkdir(parents=True, exist_ok=True)
+        with retained.open('xb') as output:
+            output.write(Path('build/native-rust-preparation.json').read_bytes())
+    - name: Verify host and execute disjoint scope
+      shell: python
+      run: |
+        import os, subprocess, sys
+        subprocess.run([sys.executable, 'tools/ci_plan.py', 'host', os.environ['TARGET']], check=True)
+        command = [sys.executable, 'tools/build.py', 'build', 'release', '--configure-only',
+                   '--core-provider', os.environ['CORE_PROVIDER'], '--build-dir', 'build/release']
+        if os.environ['CORE_PROVIDER'] == 'rust': command += ['--rust-sdk', 'build/native-rust-sdk']
+        subprocess.run(command, check=True)
+        subprocess.run([sys.executable, 'tools/test_plan.py', 'candidate-run', '--build', 'build/release',
+                        '--scope', os.environ['SCOPE'], '--jobs', os.environ.get('CTEST_PARALLEL_LEVEL', '2'),
+                        '--output', 'build/release/candidate-' + os.environ['SCOPE'] + '.json',
+                        '--summary', os.environ['GITHUB_STEP_SUMMARY']], check=True)
+    - if: always()
+      name: Retain verified source-${{ matrix.target }}-${{ matrix.scope }}-${{ github.run_attempt }}
+      uses: ./.github/actions/ci-evidence-publish
+      with:
+        name: source-${{ matrix.target }}-${{ matrix.scope }}-${{ github.run_attempt }}
+        paths: |
+          build/release/Testing/Temporary/
+          build/release/build-info.txt
+          build/release/test-reports/
+          build/release/candidate-${{ matrix.scope }}.json
+          build/release/candidate-${{ matrix.scope }}.junit.xml
+          build/release/native-rust-preparation.json
+    permissions:
+      contents: write
+      actions: read
+  package:
+    if: ${{ !inputs.devfast }}
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.packages) }}
+    name: Native package and fresh consumer ${{ matrix.target }}
+    uses: ./.github/workflows/candidate-package.yml
+    with:
+      target: ${{ matrix.target }}
+      runner: ${{ matrix.runner }}
+      build_jobs: ${{ inputs.build_jobs }}
+      preserve_artifacts: ${{ inputs.preserve_artifacts }}
+      core_provider: ${{ inputs.core_provider }}
+    permissions:
+      contents: read
+      actions: write
+  sanitizer:
+    if: ${{ !inputs.devfast }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      BUILD_JOBS: ${{ inputs.build_jobs }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Resolve compile capacity
+      shell: python
+      run: |
+        import os, sys
+        sys.path.insert(0, 'tools')
+        from build_capacity import compile_jobs
+        jobs = compile_jobs(os.environ['BUILD_JOBS'])
+        with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as output:
+            output.write('CMAKE_BUILD_PARALLEL_LEVEL=' + str(jobs) + '\n')
+    - name: Explicit pinned Rust host preparation
+      if: inputs.core_provider == 'rust'
+      run: python3 -B .github/scripts/rust_host_prepare.py --target linux-x86_64
+    - shell: python
+      env:
+        CORE_PROVIDER: ${{ inputs.core_provider }}
+      run: |
+        import os, subprocess, sys
+        command = [sys.executable, 'tools/build.py', 'test', 'asan', '--label', 'core', '--test-jobs', '2',
+                   '--core-provider', os.environ['CORE_PROVIDER']]
+        if os.environ['CORE_PROVIDER'] == 'rust': command += ['--rust-sdk', 'build/native-rust-sdk']
+        subprocess.run(command, check=True)
+  distribution:
+    if: ${{ !inputs.devfast }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Signed package, update, channel and publication failure fixtures
+      shell: python
+      run: |
+        import concurrent.futures, subprocess, sys
+        suites = ('apt_repo', 'distro_channel', 'distribution_release', 'distro_client', 'distro_check')
+        def run_suite(suite):
+            return suite, subprocess.run([sys.executable, '-B', 'tools/run_tests.py', '--suite', suite,
+                '--output', 'build/distribution-tests/' + suite + '.json']).returncode
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(run_suite, suites))
+        failed = [suite for suite, code in results if code]
+        if failed:
+            raise SystemExit('Required distribution suites failed: ' + ', '.join(failed))
+    - name: Actual signed APT install, update, rejection and removal in disposable Debian
+      env:
+        CORE_PROVIDER: ${{ inputs.core_provider }}
+      shell: python
+      run: |
+        import os, subprocess, sys
+        if os.environ['CORE_PROVIDER'] == 'rust':
+            subprocess.run([sys.executable, '-B', '.github/scripts/rust_host_prepare.py', '--target', 'linux-x86_64'], check=True)
+        subprocess.run([sys.executable, '.github/scripts/container_job.py', 'apt-native-smoke'], check=True)
+    - if: always()
+      name: Retain verified apt-mechanism-${{ github.run_attempt }}
+      uses: ./.github/actions/ci-evidence-publish
+      with:
+        name: apt-mechanism-${{ github.run_attempt }}
+        paths: |
+          build/apt-evidence/
+          build/distribution-tests/
+    permissions:
+      contents: write
+      actions: read
+  verdict:
+    permissions:
+      contents: read
+      actions: read
+    if: always()
+    needs:
+    - plan
+    - source
+    - package
+    - sanitizer
+    - distribution
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - if: needs.source.result == 'success'
+      name: Download bounded source evidence
+      uses: ./.github/actions/ci-evidence-download
+      with:
+        pattern: source-*
+    - if: needs.source.result == 'success'
+      name: Verify complete platform inventories and explicit exclusions
+      run: python .github/scripts/lifecycle.py candidate-aggregate
+      env:
+        CANDIDATE_TARGETS: ${{ needs.plan.outputs.packages }}
+        DEVFAST: ${{ inputs.devfast }}
+    - if: always() && needs.source.result == 'success'
+      name: Retain complete candidate inventory verdicts
+      uses: ./.github/actions/ci-evidence-publish
+      with:
+        name: candidate-coverage-${{ github.run_attempt }}
+        paths: build/candidate-results/*/coverage.json
+    - env:
+        RESULTS: ${{ toJSON(needs) }}
+        DEVFAST: ${{ inputs.devfast }}
+      shell: python
+      run: |
+        import json, os
+        results = json.loads(os.environ['RESULTS'])
+        required = ['plan', 'source'] if os.environ['DEVFAST'] == 'true' else list(results)
+        if any(results[name]['result'] != 'success' for name in required):
+            raise SystemExit('Required jobs failed, were skipped or did not finish')
+        with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as report:
+            report.write('Selected source scopes and applicable native package checks passed.\n')
+            report.write('Prepared SDK, old-runtime, all-GUI and exact release certification remain separate required qualification scopes.\n')
+    - name: Confirm complete workflow cleanup eligibility
+      if: success() && !inputs.devfast && inputs.include_arm && !inputs.preserve_artifacts
+      run: echo 'Full candidate passed; preceding full-run temporary evidence may be pruned after this run completes.'
+'on':
+  workflow_dispatch:
+    inputs:
+      core_provider:
+        description: Rust application default; cpp explicitly exercises legacy compatibility
+        type: choice
+        options: [rust, cpp]
+        default: rust
+      preserve_artifacts:
+        description: Keep temporary handoffs and diagnostics for one day after completion
+        type: boolean
+        default: false
+      devfast:
+        description: Focused diagnostic only; cannot qualify a release
+        type: boolean
+        default: false
+      linux_pool:
+        description: Faster uses explicitly authorized per-platform runner variables
+        type: choice
+        options:
+        - standard
+        - faster
+        default: standard
+      build_jobs:
+        description: Auto uses available CPU and RAM; explicit positive compile limit; tests remain bounded independently
+        type: choice
+        options:
+        - auto
+        - '2'
+        - '4'
+        - '8'
+        default: auto
+      include_arm:
+        description: Include native Linux ARM64 execution
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      core_provider:
+        description: Application provider; legacy compatibility explicitly selects cpp
+        type: string
+        default: rust
+      preserve_artifacts:
+        description: Keep temporary handoffs and diagnostics for one day after completion
+        type: boolean
+        default: false
+      devfast:
+        description: Focused diagnostic only; cannot qualify a release
+        type: boolean
+        default: false
+      linux_pool:
+        description: Faster uses explicitly authorized per-platform runner variables
+        type: string
+        default: standard
+      build_jobs:
+        description: Auto uses available CPU and RAM; explicit positive compile limit; tests remain bounded independently
+        type: string
+        default: auto
+      include_arm:
+        description: Include native Linux ARM64 execution
+        type: boolean
+        default: true

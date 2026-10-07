@@ -1,0 +1,8 @@
+# Paths use a bracket delimiter explicitly rejected by the configure-time guard.
+execute_process(COMMAND [========[@Python3_EXECUTABLE@]========] -B
+  [========[@CMAKE_SOURCE_DIR@/tools/import_wasm.py]========]
+  --package [========[@FOUNDATION_WASM_PACKAGE@]========]
+  --sha256 [========[@FOUNDATION_WASM_PACKAGE_SHA256@]========]
+  --source-root [========[@CMAKE_SOURCE_DIR@]========]
+  --output [========[@foundation_wasm_stage@]========]
+  COMMAND_ERROR_IS_FATAL ANY)

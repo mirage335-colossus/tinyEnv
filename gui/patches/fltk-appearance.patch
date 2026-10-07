@@ -1,0 +1,161 @@
+--- a/backends/fltk/adapter.hpp
++++ b/backends/fltk/adapter.hpp
+@@ -99,10 +99,48 @@
+         Text() : Fl_Widget(0,0,0,0) {}
+         void draw() override {
+             LiteralDrawing literal;
+-            fl_font(font.bold?FL_HELVETICA_BOLD:FL_HELVETICA,int(font.size));
++            fl_font(font.bold?FL_COURIER_BOLD:FL_COURIER,int(font.size));
+             fl_color(foreground.red,foreground.green,foreground.blue);
+             fl_draw(text.c_str(),x(),y(),w(),h(),FL_ALIGN_TOP|FL_ALIGN_LEFT|FL_ALIGN_INSIDE|
+                 (wrap==TextWrap::word?FL_ALIGN_WRAP:0),nullptr,0);
++        }
++    };
++    // Flat shared palette rendering retains native focus, key and pointer handling.
++    class Surface final : public Fl_Box {
++        Adapter& owner_;
++    public:
++        explicit Surface(Adapter& owner) : Fl_Box(0,0,0,0), owner_(owner) {}
++        void draw() override {
++            const auto& p=owner_.snapshot().palette;
++            fl_color(Adapter::color(p.surface));fl_rectf(x(),y(),w(),h());
++            fl_color(Adapter::color(p.border));fl_rect(x(),y(),w(),h());
++        }
++    };
++    template<class Native> class FlatControl final : public Native {
++        Adapter& owner_; WidgetKey key_;
++    public:
++        FlatControl(Adapter& owner,WidgetKey key) : Native(0,0,0,0),owner_(owner),key_(std::move(key)) {}
++        void draw() override {
++            LiteralDrawing literal;
++            const auto* widget=find_widget(owner_.snapshot(),key_);if(!widget)return;
++            const auto& p=owner_.snapshot().palette;const auto enabled=owner_.resolved_availability(key_).enabled;
++            const auto outline=enabled&&owner_.focused()==key_?p.accent:p.border;
++            fl_font(widget->state.font.bold?FL_COURIER_BOLD:FL_COURIER,int(widget->state.font.size));
++            if constexpr(std::is_same_v<Native,Fl_Check_Button>) {
++                const int width=std::min(20,this->w()),height=std::min(20,std::max(0,this->h()-3));
++                fl_color(Adapter::color(enabled?(widget->state.checked?p.accent:p.surface):p.disabled));
++                fl_rectf(this->x(),this->y()+3,width,height);fl_color(Adapter::color(outline));
++                fl_rect(this->x(),this->y()+3,width,height);
++                if(widget->state.checked) {fl_color(Adapter::color(enabled?p.surface:p.muted));
++                    fl_line(this->x()+4,this->y()+13,this->x()+8,this->y()+17,this->x()+16,this->y()+8);}
++                fl_color(Adapter::color(enabled?tone_color(p,widget->state.font.tone):p.muted));
++                fl_draw(widget->state.label.c_str(),this->x()+26,this->y()+2,std::max(0,this->w()-26),std::max(0,this->h()-4),FL_ALIGN_LEFT|FL_ALIGN_TOP|FL_ALIGN_INSIDE,nullptr,0);
++            } else {
++                fl_color(Adapter::color(enabled?p.surface:p.disabled));fl_rectf(this->x(),this->y(),this->w(),this->h());
++                fl_color(Adapter::color(outline));fl_rect(this->x(),this->y(),this->w(),this->h());
++                fl_color(Adapter::color(enabled?tone_color(p,widget->state.font.tone):p.muted));
++                fl_draw(widget->state.label.c_str(),this->x()+4,this->y()+2,std::max(0,this->w()-8),std::max(0,this->h()-4),FL_ALIGN_CENTER|FL_ALIGN_INSIDE,nullptr,0);
++            }
+         }
+     };
+     class Editor final : public Fl_Text_Editor {
+@@ -139,10 +177,11 @@
+         void offset(Point value) {display_insert_position_hint=0;scroll(1+int(std::max(0.0,value.y)/row_height()),int(std::max(0.0,value.x)));redraw();}
+         void draw() override {
+             Fl_Text_Editor::draw();
++            fl_color(Adapter::color(owner_.focused()==key_?owner_.snapshot().palette.accent:owner_.snapshot().palette.border));fl_rect(x(),y(),w(),h());
+             const auto* widget=find_widget(owner_.snapshot(),key_);
+             if(!widget||buffer()->length()!=0||widget->state.placeholder.empty())return;
+             LiteralDrawing literal;
+-            const auto& font=widget->state.font;fl_font(font.bold?FL_HELVETICA_BOLD:FL_HELVETICA,int(font.size));
++            const auto& font=widget->state.font;fl_font(font.bold?FL_COURIER_BOLD:FL_COURIER,int(font.size));
+             fl_color(Adapter::color(owner_.snapshot().palette.muted));
+             fl_push_clip(text_area.x,text_area.y,text_area.w,text_area.h);
+             fl_draw(widget->state.placeholder.c_str(),text_area.x,text_area.y,text_area.w,text_area.h,
+@@ -170,14 +209,16 @@
+         bool opening=false;
+         Choice(Adapter& owner,WidgetKey key) : Fl_Choice(0,0,0,0),owner_(owner),key_(std::move(key)) {}
+         void draw() override {
+-            Fl_Choice::draw();
+             LiteralDrawing literal;
+             const auto* widget=find_widget(owner_.snapshot(),key_);if(!widget)return;
+             const auto& p=owner_.snapshot().palette;
+             const auto enabled=owner_.resolved_availability(key_).enabled;
+-            fl_color(Adapter::color(enabled?p.surface:p.disabled));fl_rectf(x()+3,y()+3,std::max(0,w()-26),std::max(0,h()-6));
+-            fl_color(Adapter::color(enabled?tone_color(p,widget->state.font.tone):p.muted));fl_font(widget->state.font.bold?FL_HELVETICA_BOLD:FL_HELVETICA,int(widget->state.font.size));
+-            fl_draw(visible_text(*widget).c_str(),x()+6,y(),std::max(0,w()-32),h(),FL_ALIGN_LEFT|FL_ALIGN_INSIDE,nullptr,0);
++            fl_color(Adapter::color(enabled?p.surface:p.disabled));fl_rectf(x(),y(),w(),h());
++            fl_color(Adapter::color(enabled&&owner_.focused()==key_?p.accent:p.border));fl_rect(x(),y(),w(),h());
++            fl_color(Adapter::color(enabled?tone_color(p,widget->state.font.tone):p.muted));fl_font(widget->state.font.bold?FL_COURIER_BOLD:FL_COURIER,int(widget->state.font.size));
++            const bool choice=widget->spec.kind==Kind::choice;
++            fl_draw(visible_text(*widget).c_str(),x()+5,y()+2,std::max(0,w()-(choice?25:10)),std::max(0,h()-4),FL_ALIGN_LEFT|FL_ALIGN_TOP|FL_ALIGN_INSIDE,nullptr,0);
++            if(choice) {fl_color(Adapter::color(enabled?p.border:p.muted));fl_line(x()+w()-9,y()+h()/2-5,x()+w()-4,y()+h()/2,x()+w()-9,y()+h()/2+5);}
+         }
+         int handle(int event) override {
+             if(event==FL_FOCUS)owner_.RetainedAdapter::focus(key_);
+@@ -261,7 +302,7 @@
+     }
+     static Size metrics(const TextMeasureRequest& request) {
+         validate_measure_request(request);LiteralDrawing literal;
+-        fl_font(request.font.bold?FL_HELVETICA_BOLD:FL_HELVETICA,int(request.font.size));
++        fl_font(request.font.bold?FL_COURIER_BOLD:FL_COURIER,int(request.font.size));
+         int width=request.wrap==TextWrap::word?int(request.available_width):0,height=0;
+         fl_measure(request.text.c_str(),width,height,0);
+         return {std::min(coordinate_limit,double(width)),std::min(coordinate_limit,double(height))};
+@@ -304,10 +345,10 @@
+         auto entry=std::make_unique<Entry>();entry->owner=this;entry->key=widget.spec.key;entry->kind=widget.spec.kind;
+         window_->begin();entry->clip=new Clip;entry->clip->begin();
+         switch(widget.spec.kind) {
+-        case Kind::group:entry->native=new Fl_Box(0,0,0,0);break;
++        case Kind::group:entry->native=new Surface(*this);break;
+         case Kind::label:entry->native=new Text;break;
+-        case Kind::button:entry->native=new Fl_Button(0,0,0,0);break;
+-        case Kind::toggle:entry->native=new Fl_Check_Button(0,0,0,0);break;
++        case Kind::button:entry->native=new FlatControl<Fl_Button>(*this,widget.spec.key);break;
++        case Kind::toggle:entry->native=new FlatControl<Fl_Check_Button>(*this,widget.spec.key);break;
+         case Kind::text:entry->native=new Editor(*this,widget.spec.key);break;
+         case Kind::choice:case Kind::menu:entry->native=new Choice(*this,widget.spec.key);break;
+         case Kind::list:case Kind::bitmap:entry->native=new Canvas(*this,widget.spec.key);break;
+@@ -331,7 +372,7 @@
+         } else {
+             const auto offset=scroll_offset(key);
+             if(widget.state.records.empty()) {
+-                fl_font(FL_HELVETICA,int(widget.state.font.size));fl_color(color(snapshot().palette.muted));
++                fl_font(FL_COURIER,int(widget.state.font.size));fl_color(color(snapshot().palette.muted));
+                 fl_draw(widget.state.placeholder.c_str(),native.x()+4,native.y()+4,std::max(0,native.w()-8),std::max(0,native.h()-8),FL_ALIGN_TOP|FL_ALIGN_LEFT|FL_ALIGN_INSIDE,nullptr,0);
+             }
+             for(std::size_t index=0;index<widget.state.records.size();++index) {
+@@ -344,7 +385,7 @@
+                 for(const auto& cell:cells) {
+                     const auto clipped=intersect(area.clip,{area.bounds.x+cell.bounds.x-offset.x,y+cell.bounds.y,cell.bounds.width,cell.bounds.height});
+                     fl_push_clip(int(clipped.x),int(clipped.y),int(clipped.width),int(clipped.height));
+-                    fl_font(cell.font.bold?FL_HELVETICA_BOLD:FL_HELVETICA,int(cell.font.size));fl_color(color(row.enabled&&area.enabled?tone_color(snapshot().palette,cell.font.tone):snapshot().palette.muted));
++                    fl_font(cell.font.bold?FL_COURIER_BOLD:FL_COURIER,int(cell.font.size));fl_color(color(row.enabled&&area.enabled?tone_color(snapshot().palette,cell.font.tone):snapshot().palette.muted));
+                     fl_draw(cell.text.c_str(),int(area.bounds.x+cell.bounds.x-offset.x),int(y+cell.bounds.y),int(cell.bounds.width),int(cell.bounds.height),
+                         FL_ALIGN_TOP|FL_ALIGN_LEFT|FL_ALIGN_INSIDE|(cell.wrap==TextWrap::word?FL_ALIGN_WRAP:0),nullptr,0);
+                     fl_pop_clip();
+@@ -475,11 +516,11 @@
+             if(area.visible)entry.clip->show();else entry.clip->hide();
+             if(area.enabled)native.activate();else native.deactivate();
+             native.copy_tooltip(widget.state.help.c_str());native.labelsize(int(widget.state.font.size));
+-            native.labelfont(widget.state.font.bold?FL_HELVETICA_BOLD:FL_HELVETICA);
++            native.labelfont(widget.state.font.bold?FL_COURIER_BOLD:FL_COURIER);
+             native.labeltype(literal_label);native.labelcolor(color(tone_color(palette,widget.state.font.tone)));
+             native.color(color(area.enabled?palette.surface:palette.disabled));native.selection_color(color(palette.selection));
+             native.box(FL_THIN_UP_BOX);
+-            if(widget.spec.kind==Kind::group)native.box(FL_FLAT_BOX);
++            if(widget.spec.kind==Kind::group||widget.spec.kind==Kind::text)native.box(FL_FLAT_BOX);
+             if(widget.spec.kind==Kind::button||widget.spec.kind==Kind::toggle)native.copy_label(widget.state.label.c_str());
+             else native.copy_label("");
+             window_->remove(entry.clip);window_->add(entry.clip);
+@@ -489,7 +530,7 @@
+             case Kind::text: {
+                 auto& editor=static_cast<Editor&>(native);
+                 editor.wrapping(widget.spec.text_policy.multiline&&widget.state.wrap==TextWrap::word);
+-                editor.when(FL_WHEN_CHANGED);editor.textsize(int(widget.state.font.size));editor.textfont(widget.state.font.bold?FL_HELVETICA_BOLD:FL_HELVETICA);
++                editor.when(FL_WHEN_CHANGED);editor.textsize(int(widget.state.font.size));editor.textfont(widget.state.font.bold?FL_COURIER_BOLD:FL_COURIER);
+                 editor.textcolor(color(area.enabled?tone_color(palette,widget.state.font.tone):palette.muted));editor.cursor_color(color(palette.accent));
+                 editor.show_cursor(!widget.spec.text_policy.read_only);
+                 if(widget.state.text!=editor.value()) {const auto selection=policy().text_selection(entry.key);editor.value(widget.state.text.c_str());editor.selection(selection);}
+@@ -550,7 +591,9 @@
+     }
+     bool focus(std::optional<WidgetKey> key) override {
+         if(!RetainedAdapter::focus(key))return false;
+-        if(key)if(auto* native=native_widget(*key))native->take_focus();
++        if(key) { if(auto* native=native_widget(*key))native->take_focus(); }
++        else if(Fl::focus()&&window_->contains(Fl::focus()))Fl::focus(nullptr);
++        window_->redraw();
+         return true;
+     }
+     bool focus_next(bool reverse=false) override {

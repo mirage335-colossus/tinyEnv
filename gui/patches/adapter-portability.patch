@@ -1,0 +1,21 @@
+--- a/tests/adapter_test.cpp
++++ b/tests/adapter_test.cpp
+@@ -46,12 +46,15 @@
+ void measured_requests_and_guards() {
+     MemoryAdapter missing;rejects([&]{missing.measure_text({});});
+     unsigned calls=0;bool fail=false,mutate=false,recurse=false;
+-    MemoryAdapter memory({},4096,[&](const TextMeasureRequest& request)->Size {
++    MemoryAdapter* active=nullptr;
++    MemoryAdapter memory({},4096,[&active,&calls,&fail,&mutate,&recurse](const TextMeasureRequest& request)->Size {
++        check(active!=nullptr,"Metrics callback ran before adapter construction completed");
+         ++calls;
+-        if(mutate)memory.close();
+-        if(recurse)return memory.measure_text(request);
++        if(mutate)active->close();
++        if(recurse)return active->measure_text(request);
+         return fail?Size{-1,0}:Size{request.available_width,12};
+     });
++    active=&memory;
+     Adapter& adapter=memory;
+     for(auto invalid:{TextMeasureRequest{"\xc0\x80",{}},TextMeasureRequest{"a",{0}},
+                       TextMeasureRequest{"a",{},-1},TextMeasureRequest{"a",{},0,0},

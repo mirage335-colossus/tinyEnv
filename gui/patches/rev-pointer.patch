@@ -1,0 +1,224 @@
+--- backends/rev/adapter.cpp
++++ backends/rev/adapter.cpp
+@@ -3,6 +3,7 @@
+ #include "clipboard.hpp"
+ #include "gui/presentation.hpp"
+ #include "rev_embedded.hpp"
++#include "WinEvent.hpp"
+ #include <algorithm>
+ #include <cmath>
+ #include <cctype>
+@@ -133,6 +134,8 @@
+     std::unique_ptr<re::Text> measure;
+     std::unique_ptr<re::Text> tooltip;
+     std::optional<WidgetKey> hover;
++    struct PointerCapture {WidgetKey key;Point origin,last;unsigned clicks=1;};
++    std::optional<PointerCapture> pointer_capture;
+     Point hover_point;
+     std::chrono::steady_clock::time_point hover_started;
+     bool tooltip_visible=false;
+@@ -182,8 +185,9 @@
+     void capture_editor(Editor& editor);
+     void editor_clipboard(Editor& editor,const std::string& command);
+     Size measure_text(const TextMeasureRequest& request);
+-    std::optional<WidgetKey> hit(Point point) const;
++    std::optional<WidgetKey> hit(Point point,bool interactive=false) const;
+     bool raw_pointer(re::Event& event,PointerKind kind);
++    void cancel_pointer();
+     bool wheel(re::Event& event);
+     void key(re::Event& event);
+     void open_popup(const WidgetKey& key);
+@@ -339,14 +343,20 @@
+     explicit Window(Impl& owner):Rev::Window(owner.windows,{.name="Generic GUI",.size={640,480,{1,1},{0,0}}}),impl(owner) {
+         style->overflow=Overflow::Hide;spacing(style->padding,0);
+     }
+-    void onClose(bool& reject) override {reject=true;impl.safely([&]{impl.send(CloseEvent{});});}
++    void onClose(bool& reject) override {reject=true;impl.safely([&]{impl.cancel_pointer();impl.send(CloseEvent{});});}
++    void onDefocus() override {impl.safely([&]{impl.cancel_pointer();Rev::Window::onDefocus();});}
++    void onMinimize() override {impl.safely([&]{impl.cancel_pointer();Rev::Window::onMinimize();});}
++    void onEvent(WinEvent& event) override {
++        if(event.type==WinEvent::CaptureLost)impl.safely([&]{impl.cancel_pointer();});
++        Rev::Window::onEvent(event);
++    }
+     void onResize(int width,int height) override {
+         Rev::Window::onResize(width,height);
+-        if(impl.shown&&!impl.owner.closed())impl.safely([&]{impl.send(ResizeEvent{{double(width)/details.scale,double(height)/details.scale},details.scale});});
++        if(impl.shown&&!impl.owner.closed())impl.safely([&]{impl.cancel_pointer();impl.send(ResizeEvent{{double(width)/details.scale,double(height)/details.scale},details.scale});});
+     }
+     void onScale(float scale) override {
+         Rev::Window::onScale(scale);
+-        if(impl.shown&&!impl.owner.closed())impl.safely([&]{impl.send(ResizeEvent{{double(window->size.w)/scale,double(window->size.h)/scale},scale});});
++        if(impl.shown&&!impl.owner.closed())impl.safely([&]{impl.cancel_pointer();impl.send(ResizeEvent{{double(window->size.w)/scale,double(window->size.h)/scale},scale});});
+     }
+     void keyDown(re::Event& event) override {impl.safely([&]{impl.key(event);});}
+     void textInput(re::Event& event) override {
+@@ -362,11 +372,11 @@
+                 if(!gui::contains({rect.x,rect.y,rect.w,rect.h},{event.mouse.pos.x,event.mouse.pos.y}))impl.close_popup();
+                 else {Rev::Window::mouseDown(event);return;}
+             }
+-            if(event.mouse.rb)if(const auto target=impl.hit({event.mouse.pos.x,event.mouse.pos.y})) {
++            if(event.mouse.rb)if(const auto target=impl.hit({event.mouse.pos.x,event.mouse.pos.y},true)) {
+                 if(impl.owner.open_popup(*target)){event.propagate=false;return;}
+             }
+-            if(impl.raw_pointer(event,event.mouse.lb.isDoubleClick()?PointerKind::double_click:PointerKind::click))return;
+-            if(const auto target=impl.hit({event.mouse.pos.x,event.mouse.pos.y})) {
++            if(impl.raw_pointer(event,event.mouse.lb?PointerKind::press:PointerKind::click))return;
++            if(const auto target=impl.hit({event.mouse.pos.x,event.mouse.pos.y},true)) {
+                 const auto* widget=find_widget(impl.owner.snapshot(),*target);
+                 impl.owner.RetainedAdapter::focus(*target);impl.dirty=true;
+                 if(event.mouse.rb||widget->spec.kind==Kind::choice||widget->spec.kind==Kind::menu) {
+@@ -376,14 +386,18 @@
+             Rev::Window::mouseDown(event);
+         });
+     }
+-    void mouseUp(re::Event& event) override {impl.safely([&]{Rev::Window::mouseUp(event);});}
++    void mouseUp(re::Event& event) override {
++        impl.safely([&]{if(!impl.raw_pointer(event,PointerKind::release))Rev::Window::mouseUp(event);});
++    }
+     void mouseMove(re::Event& event) override {
+         impl.safely([&]{
+             if(!impl.raw_pointer(event,PointerKind::move))Rev::Window::mouseMove(event);
+             impl.update_hover({event.mouse.pos.x,event.mouse.pos.y});
+         });
+     }
+-    void mouseDrag(re::Event& event) override {impl.safely([&]{Rev::Window::mouseDrag(event);});}
++    void mouseDrag(re::Event& event) override {
++        impl.safely([&]{if(!impl.pointer_capture)Rev::Window::mouseDrag(event);});
++    }
+     void mouseWheel(re::Event& event) override {
+         impl.safely([&]{if(!impl.raw_pointer(event,PointerKind::wheel)&&!impl.wheel(event))Rev::Window::mouseWheel(event);});
+     }
+@@ -675,23 +689,50 @@
+     focus_shared();window->shared->layoutDirty=true;window->refresh(window->event);dirty=false;
+ }
+ 
+-std::optional<WidgetKey> Adapter::Impl::hit(Point point) const {
++std::optional<WidgetKey> Adapter::Impl::hit(Point point,bool interactive) const {
+     const auto order=paint_order(owner.snapshot());
+     for(auto it=order.rbegin();it!=order.rend();++it) {
+         const auto area=owner.resolved_availability(*it);
+-        if(area.enabled&&area.visible&&contains(area.clip,point))return *it;
++        const auto* widget=find_widget(owner.snapshot(),*it);
++        if(area.enabled&&area.visible&&contains(area.clip,point)&&
++            (!interactive||widget->spec.pointer_input||focusable(*widget)))return *it;
+     }
+     return std::nullopt;
+ }
+ bool Adapter::Impl::raw_pointer(re::Event& event,PointerKind kind) {
+     if(owner.closed()||prompt||popup)return false;
+-    const auto target=hit({event.mouse.pos.x,event.mouse.pos.y});
++    const Point position{event.mouse.pos.x,event.mouse.pos.y};
++    const bool control=bool(event.keyboard.ctrl),shift=bool(event.keyboard.shift),alt=bool(event.keyboard.alt);
++    if(kind==PointerKind::release||(kind==PointerKind::move&&pointer_capture)) {
++        if(!pointer_capture)return false;
++        if(kind==PointerKind::release&&event.mouse.lb){event.propagate=false;return true;}
++        const auto capture=*pointer_capture;
++        if(!eligible(capture.key)||hit(capture.origin,true)!=capture.key) {
++            cancel_pointer();event.propagate=false;return true;
++        }
++        pointer_capture->last=position;
++        if(kind==PointerKind::release)pointer_capture.reset();
++        send(WidgetEvent{capture.key,PointerInput{kind,position,0,0,control,shift,alt,1,capture.clicks}});
++        event.propagate=false;return true;
++    }
++    if(pointer_capture){event.propagate=false;return true;}
++    const auto target=hit(position,true);
+     if(!target||!find_widget(owner.snapshot(),*target)->spec.pointer_input)return false;
+-    owner.RetainedAdapter::focus(*target);
+-    send(WidgetEvent{*target,PointerInput{kind,{event.mouse.pos.x,event.mouse.pos.y},
++    const auto clicks=event.mouse.lb.isDoubleClick()?2u:1u;
++    if(kind==PointerKind::press) {
++        owner.RetainedAdapter::focus(*target);
++        pointer_capture=PointerCapture{*target,position,position,clicks};
++    } else if(kind==PointerKind::click||kind==PointerKind::double_click)owner.RetainedAdapter::focus(*target);
++    send(WidgetEvent{*target,PointerInput{kind,position,
+         kind==PointerKind::wheel?-event.mouse.wheel.x/120.0:0,kind==PointerKind::wheel?event.mouse.wheel.y/120.0:0,
+-        bool(event.keyboard.ctrl),bool(event.keyboard.shift),bool(event.keyboard.alt)}});
++        control,shift,alt,kind==PointerKind::press?1u:0u,clicks}});
+     event.propagate=false;return true;
++}
++void Adapter::Impl::cancel_pointer() {
++    if(!pointer_capture)return;
++    const auto capture=*pointer_capture;pointer_capture.reset();
++    send(WidgetEvent{capture.key,PointerInput{PointerKind::cancel,capture.last,0,0,false,false,false,1,capture.clicks}});
++    if(!owner.closed())owner.policy().cancel_pointer();
+ }
+ bool Adapter::Impl::wheel(re::Event& event) {
+     if(owner.closed()||prompt||popup)return false;
+@@ -713,6 +754,7 @@
+ void Adapter::Impl::key(re::Event& event) {
+     if(owner.closed())return;
+     auto& keyboard=event.keyboard;
++    if(keyboard.escape)cancel_pointer();
+     if(prompt) {
+         if(!prompt->root){event.propagate=false;return;}
+         if(keyboard.escape)finish_prompt(ServiceStatus::cancelled);
+@@ -775,6 +817,7 @@
+ }
+ 
+ void Adapter::Impl::open_popup(const WidgetKey& key) {
++    cancel_pointer();
+     close_popup();
+     if(!eligible(key)||!owner.policy().open_popup(key))return;
+     const auto* widget=find_widget(owner.snapshot(),key);
+@@ -903,7 +946,15 @@
+     :RetainedAdapter(std::move(sink),[this](const TextMeasureRequest& request){return measure_text(request);}),impl_(std::make_unique<Impl>(*this)){}
+ Adapter::~Adapter()=default;
+ void Adapter::present(Snapshot snapshot) {
++    const bool revoke_pointer=this->snapshot().client_size!=snapshot.client_size||this->snapshot().display_scale!=snapshot.display_scale||
++        this->snapshot().active_page!=snapshot.active_page||this->snapshot().modal_root!=snapshot.modal_root;
+     RetainedAdapter::present(std::move(snapshot));impl_->dirty=true;impl_->tooltip_visible=false;
++    if(impl_->pointer_capture) {
++        const auto capture=*impl_->pointer_capture;
++        if(revoke_pointer||!impl_->eligible(capture.key)||impl_->hit(capture.origin,true)!=capture.key) {
++            impl_->pointer_capture.reset();policy().cancel_pointer();
++        }
++    }
+     for(auto it=impl_->editor_offsets.begin();it!=impl_->editor_offsets.end();) {
+         if(!find_widget(this->snapshot(),it->second.first))it=impl_->editor_offsets.erase(it);else ++it;
+     }
+@@ -953,6 +1004,7 @@
+ }
+ void Adapter::invalidate(const WidgetKey& key,PixelRect damage) {RetainedAdapter::invalidate(key,damage);impl_->dirty=true;}
+ void Adapter::close() {
++    impl_->pointer_capture.reset();
+     RetainedAdapter::close();impl_->closing=true;impl_->dirty=true;
+     impl_->clipboard.cancel();impl_->clipboard_reply={};
+     // The service owner receives one terminal outcome; native controls survive
+@@ -999,7 +1051,7 @@
+         completion({request.id,ServiceStatus::error,{},"This Rev host does not provide the requested platform service"});return true;
+     }
+     if(!valid_utf8(request.title)||!runtime_detail::input_error(request,request.value).empty())throw std::invalid_argument("Invalid prompt request");
+-    impl_->close_popup();impl_->prompt=std::make_unique<Impl::Prompt>();
++    impl_->cancel_pointer();impl_->close_popup();impl_->prompt=std::make_unique<Impl::Prompt>();
+     impl_->prompt->request=std::move(request);impl_->prompt->complete=std::move(completion);impl_->dirty=true;
+     sync();return true;
+ }
+@@ -1097,8 +1149,27 @@
+     event.mouse.pos={float(point.x),float(point.y)};event.mouse.down=event.mouse.pos;
+     event.mouse.lb.id=button==1?1:0;event.mouse.rb.id=button==3?1:0;
+     event.mouse.lb.pressTimeDiff=double_click?0:1000;event.mouse.lb.pressPosDiff={0,0};
++    // This historical helper represents one semantic click. Physical gesture
++    // qualification uses pointer_phase and the native Window phase handlers.
++    if(adapter.impl_->raw_pointer(event,double_click?PointerKind::double_click:PointerKind::click)) {
++        event.mouse.lb.id=0;event.mouse.rb.id=0;return;
++    }
+     window.setTargets(event);window.mouseDown(event);event.resetBeforeDispatch();window.mouseUp(event);
+     event.mouse.lb.id=0;event.mouse.rb.id=0;
++}
++void Probe::pointer_phase(Adapter& adapter,PointerKind kind,Point point,unsigned clicks) {
++    adapter.sync();if(adapter.closed())return;
++    auto& window=*adapter.impl_->window;auto& event=window.event;event.resetBeforeDispatch();
++    event.mouse.pos={float(point.x),float(point.y)};
++    event.mouse.lb.pressTimeDiff=clicks>1?0:1000;event.mouse.lb.pressPosDiff={0,0};
++    if(kind==PointerKind::press) {event.mouse.lb.id=1;event.mouse.down=event.mouse.pos;}
++    else if(kind==PointerKind::release) {event.mouse.lb.id=-1;event.mouse.up=event.mouse.pos;}
++    window.setTargets(event);
++    if(kind==PointerKind::press)window.mouseDown(event);
++    else if(kind==PointerKind::release)window.mouseUp(event);
++    else if(kind==PointerKind::move)window.mouseMove(event);
++    else if(kind==PointerKind::cancel) {window.onDefocus();event.mouse.lb.id=0;}
++    else throw std::invalid_argument("Expected physical pointer phase");
+ }
+ void Probe::wheel(Adapter& adapter,Point position,Point detents) {
+     adapter.sync();if(adapter.closed())return;

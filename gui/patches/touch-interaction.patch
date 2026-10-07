@@ -1,0 +1,137 @@
+--- include/gui/interaction.hpp
++++ include/gui/interaction.hpp
+@@ -54,7 +54,10 @@
+             }
+             editors.emplace(widget.spec.key.id,std::move(entry));
+         }
++        const bool revoke_pointer=snapshot().client_size!=view.client_size||snapshot().display_scale!=view.display_scale||snapshot().active_page!=view.active_page||snapshot().modal_root!=view.modal_root;
+         RetainedAdapter::present(std::move(view));editors_.swap(editors);
++        if(revoke_pointer)gesture_.reset();
++        if(gesture_&&pointer_target(gesture_->origin)!=gesture_->target) {gesture_.reset();policy().cancel_pointer();}
+         if(popup_) {
+             const auto* widget=find_widget(snapshot(),popup_->key);
+             const auto area=resolved_availability(popup_->key);
+@@ -63,6 +66,7 @@
+     }
+     bool open_popup(const WidgetKey& key) override {
+         if(prompt_||!RetainedAdapter::open_popup(key))return false;
++        gesture_.reset();
+         if(popup_&&popup_->key!=key)RetainedAdapter::close_popup(popup_->key);
+         const auto* widget=find_widget(snapshot(),key);
+         popup_=Popup{key,widget->spec.kind==Kind::bitmap?widget->state.actions:widget->state.options,0};
+@@ -76,7 +80,7 @@
+         RetainedAdapter::close_popup(key);if(popup_&&popup_->key==key)popup_.reset();
+     }
+     void close() override {
+-        RetainedAdapter::close();popup_.reset();prompt_.reset();completion_={};editors_.clear();
++        RetainedAdapter::close();gesture_.reset();popup_.reset();prompt_.reset();completion_={};editors_.clear();
+     }
+     bool focus(std::optional<WidgetKey> target) override {
+         const auto accepted=RetainedAdapter::focus(target);
+@@ -126,7 +130,7 @@
+     const std::optional<Popup>& popup() const {(void)closed();return popup_;}
+     const std::optional<ServiceRequest>& prompt() const {(void)closed();return prompt_;}
+     TextSelection prompt_selection() const {(void)closed();return prompt_selection_;}
+-    void resize(Size viewport,double scale=1) {if(!closed())policy().send(ResizeEvent{viewport,scale});}
++    void resize(Size viewport,double scale=1) {if(!closed()) {gesture_.reset();policy().cancel_pointer();policy().send(ResizeEvent{viewport,scale});}}
+ 
+     // Hosts pass decoded UTF-8 insertion separately from physical key presses;
+     // a Space key event therefore never inserts a second copy of a text event.
+@@ -205,6 +209,34 @@
+         if(closed()||!std::isfinite(input.position.x)||!std::isfinite(input.position.y)||
+             !std::isfinite(input.wheel_x)||!std::isfinite(input.wheel_y))return;
+         policy().require_interaction();
++        const bool ending=input.kind==PointerKind::release||input.kind==PointerKind::cancel;
++        if(input.kind==PointerKind::press) {
++            if(gesture_||input.pointer_id==0)return;
++            const auto target=pointer_target(input.position);if(!target)return;
++            gesture_=Gesture{input.pointer_id,*target,input.position};
++            if(target->raw) {focus(target->key);policy().send(WidgetEvent{target->key,input});}
++            return;
++        }
++        if(ending||(input.kind==PointerKind::move&&input.pointer_id!=0)) {
++            if(!gesture_||gesture_->owner!=input.pointer_id)return;
++            const auto capture=*gesture_;
++            if(pointer_target(capture.origin)!=capture.target) {gesture_.reset();policy().cancel_pointer();return;}
++            if(ending)gesture_.reset();
++            if(capture.target.raw) {
++                policy().send(WidgetEvent{capture.target.key,input});
++                // Preserve the existing explicit raw double-click semantic in
++                // addition to the physical release; never synthesize on cancel.
++                if(input.kind==PointerKind::release&&input.clicks>1) {
++                    input.kind=PointerKind::double_click;input.pointer_id=0;
++                    policy().send(WidgetEvent{capture.target.key,input});
++                }
++                return;
++            }
++            // Ordinary controls activate only after release over the same live
++            // target. Leaving the control is allowed; cancellation never clicks.
++            if(input.kind!=PointerKind::release||pointer_target(input.position)!=capture.target)return;
++            input.kind=input.clicks>1?PointerKind::double_click:PointerKind::click;input.pointer_id=0;
++        } else if(gesture_)return;
+         if(prompt_) {
+             if(input.kind==PointerKind::click) {
+                 if(contains(prompt_cancel_bounds(),input.position))finish_prompt(ServiceStatus::cancelled);
+@@ -237,6 +269,9 @@
+                 if(input.kind==PointerKind::click||input.kind==PointerKind::double_click)focus(id);
+                 policy().send(WidgetEvent{id,input});return;
+             }
++            // Inert text may overlay a raw canvas; hovering or wheeling over
++            // that text must reach the same surface as physical gestures.
++            if(widget.spec.kind==Kind::label)continue;
+             if(input.kind==PointerKind::wheel) {scroll_hit(widget,input);return;}
+             if(input.kind!=PointerKind::click&&input.kind!=PointerKind::double_click)return;
+             if(!focusable(widget))continue;
+@@ -281,6 +316,7 @@
+         if(!runtime_detail::input_error(request,request.value).empty()||!valid_utf8(request.title))
+             throw std::invalid_argument("Invalid prompt request");
+         if(popup_) {const auto target=popup_->key;close_popup(target);}
++        gesture_.reset();policy().cancel_pointer();
+         prompt_selection_={0,request.value.size()};prompt_=std::move(request);completion_=std::move(completion);return true;
+     }
+     double line_height(const Font& font={}) const {
+@@ -379,6 +415,44 @@
+         return gui::prompt_accept_bounds(snapshot().client_size);
+     }
+ private:
++    struct PointerTarget {
++        WidgetKey key;
++        std::string part;
++        bool raw=false;
++        bool operator==(const PointerTarget&) const = default;
++    };
++    struct Gesture {std::uint64_t owner;PointerTarget target;Point origin;};
++    std::optional<Gesture> gesture_;
++    std::optional<PointerTarget> pointer_target(Point position) const {
++        if(prompt_) {
++            const auto prefix="prompt:"+std::to_string(prompt_->id)+":";
++            if(contains(prompt_cancel_bounds(),position))return PointerTarget{{},prefix+"cancel"};
++            if(contains(prompt_accept_bounds(),position))return PointerTarget{{},prefix+"accept"};
++            if(contains(prompt_field_bounds(),position))return PointerTarget{{},prefix+"field"};
++            return std::nullopt;
++        }
++        if(popup_) {
++            const auto area=popup_bounds();
++            if(!contains(area,position))return PointerTarget{popup_->key,"popup:outside"};
++            const auto index=std::min(popup_->options.size()-1,static_cast<std::size_t>((position.y-area.y)/popup_row_height()));
++            return PointerTarget{popup_->key,"popup:"+popup_->options[index].id};
++        }
++        for(const auto& [page,area]:page_bounds())if(page.enabled&&contains(area,position))
++            return PointerTarget{{},"page:"+page.id};
++        const auto order=paint_order(snapshot());
++        for(auto it=order.rbegin();it!=order.rend();++it) {
++            const auto area=resolved_availability(*it);
++            if(!area.visible||!area.enabled||!contains(area.clip,position))continue;
++            const auto* widget=find_widget(snapshot(),*it);
++            if(widget->spec.pointer_input)return PointerTarget{*it,{},true};
++            if(widget->spec.kind==Kind::list) {
++                const auto index=static_cast<std::size_t>((position.y-area.bounds.y+scroll_offset(*it).y)/widget->spec.row_height);
++                return PointerTarget{*it,index<widget->state.records.size()?"row:"+widget->state.records[index].id:"row:none"};
++            }
++            if(focusable(*widget))return PointerTarget{*it,{}};
++        }
++        return std::nullopt;
++    }
+     double editor_inset_;
+     struct EditorView {
+         WidgetKey key;Point offset;bool reveal=true;TextSelection selection;

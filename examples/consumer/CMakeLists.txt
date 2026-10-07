@@ -1,0 +1,17 @@
+cmake_minimum_required(VERSION 3.24)
+project(FoundationConsumer LANGUAGES CXX)
+find_package(Foundation 0.1 CONFIG REQUIRED)
+add_executable(consumer main.cpp)
+target_link_libraries(consumer PRIVATE foundation::core)
+foundation_apply_runtime(consumer)
+# Historical C++ exports predate provider identification. New exports must
+# identify the implementation that this relocated consumer actually executes.
+if(DEFINED Foundation_CORE_PROVIDER)
+  if(Foundation_CORE_PROVIDER STREQUAL "rust")
+    target_compile_definitions(consumer PRIVATE FOUNDATION_EXPECT_TEXT_PROVIDER=1)
+  elseif(Foundation_CORE_PROVIDER STREQUAL "cpp")
+    target_compile_definitions(consumer PRIVATE FOUNDATION_EXPECT_TEXT_PROVIDER=0)
+  else()
+    message(FATAL_ERROR "Unsupported Foundation core provider: ${Foundation_CORE_PROVIDER}")
+  endif()
+endif()

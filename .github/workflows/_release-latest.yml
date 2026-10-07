@@ -1,0 +1,200 @@
+name: _Publish new Latest release
+run-name: Latest preparation from ${{ github.ref_name }} (${{ inputs.profile }})
+'on':
+  workflow_dispatch:
+    inputs:
+      core_provider:
+        description: Rust application default; cpp explicitly selects legacy compatibility
+        type: choice
+        options: [rust, cpp]
+        default: rust
+      preserve_artifacts:
+        description: Keep temporary handoffs and diagnostics for one day after completion
+        type: boolean
+        default: false
+      tag:
+        description: New application tag; empty selects release-RUN-attempt-ATTEMPT
+        type: string
+        default: ''
+      profile:
+        description: Complete supported target and backend inventory
+        type: choice
+        options: [core, all-gui]
+        default: core
+      recipes:
+        description: JSON target-to-exact-existing-SDK-recipe map; never cold-builds
+        type: string
+        required: true
+      linux_pool:
+        description: Standard or explicitly configured faster runners for all stages
+        type: choice
+        options: [standard, faster]
+        default: standard
+      jobs:
+        description: Auto uses producer CPU and RAM; explicit compile override
+        type: choice
+        options: [auto, '2', '4', '8']
+        default: auto
+      gui_group:
+        description: Exact retained GUI group SHA-256 for all-gui; empty for core
+        type: string
+        default: ''
+      graphics_archive_url:
+        description: Explicit retained HTTPS Windows graphics input for all-gui
+        type: string
+        default: ''
+      execute:
+        description: Publish, certify and promote after every mandatory gate passes
+        type: boolean
+        default: false
+      package_release:
+        description: Native package revision, 1 through 999999; increase for each package update
+        type: string
+        required: true
+      previous_packages:
+        description: JSON Linux-target map of exact previous package selectors for mandatory native upgrade checks
+        type: string
+        default: '{}'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  # Do not share the child publisher lock; the caller waits for its children.
+  group: foundation-publish-new-latest
+  cancel-in-progress: false
+env:
+  GH_TOKEN: ${{ github.token }}
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+  CORE_PROVIDER: ${{ inputs.core_provider }}
+  TAG: ${{ inputs.tag }}
+  PROFILE: ${{ inputs.profile }}
+  RECIPES: ${{ inputs.recipes }}
+  GUI_GROUP: ${{ inputs.gui_group }}
+  GRAPHICS_ARCHIVE_URL: ${{ inputs.graphics_archive_url }}
+  EXECUTE: ${{ inputs.execute }}
+  JOBS: ${{ inputs.jobs }}
+  PACKAGE_RELEASE: ${{ inputs.package_release }}
+  PREVIOUS_PACKAGES: ${{ inputs.previous_packages }}
+jobs:
+  prepare:
+    name: Freeze source, target inventory and existing dependency identities
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.prepare.outputs.tag }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - id: prepare
+      run: python3 -B tools/latest_release.py preflight --output build/latest-request.json
+  regression:
+    name: Verify the nested full candidate regression receipt
+    if: always()
+    needs: application
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      APPLICATION_RESULT: ${{ needs.application.result }}
+      REGRESSION_RESULT: ${{ needs.application.outputs.regression_result }}
+    steps:
+    - name: Require successful full regression before certification
+      shell: python
+      run: |
+        import os
+        if os.environ['APPLICATION_RESULT'] != 'success' or os.environ['REGRESSION_RESULT'] != 'success':
+            raise SystemExit('Application or its required full candidate regression failed, was cancelled, skipped or incomplete')
+        with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as out:
+            out.write('Required full candidate regression passed inside SDK application production. This receipt gate does not repeat regression.\n')
+  application:
+    name: Consume exact SDKs and publish the complete ordinary candidate
+    needs: prepare
+    permissions:
+      contents: write
+      actions: write
+    uses: ./.github/workflows/sdk-application.yml
+    secrets:
+      DISTRIBUTION_SIGNING_KEY: ${{ secrets.DISTRIBUTION_SIGNING_KEY }}
+    with:
+      preserve_artifacts: ${{ inputs.preserve_artifacts }}
+      core_provider: ${{ inputs.core_provider }}
+      profile: ${{ inputs.profile }}
+      recipes: ${{ inputs.recipes }}
+      linux_pool: ${{ inputs.linux_pool }}
+      tag: ${{ needs.prepare.outputs.tag }}
+      experiment: false
+      require_regression: true
+      package_repository: true
+      package_release: ${{ inputs.package_release }}
+      jobs: ${{ inputs.jobs }}
+      execute: ${{ inputs.execute }}
+      gui_group: ${{ inputs.gui_group }}
+      graphics_archive_url: ${{ inputs.graphics_archive_url }}
+  certification:
+    name: Certify exact remotely downloaded bytes and attach immutable evidence
+    if: inputs.execute
+    needs: [application, regression]
+    permissions:
+      contents: write
+      actions: write
+    uses: ./.github/workflows/certify.yml
+    with:
+      preserve_artifacts: ${{ inputs.preserve_artifacts }}
+      tag: ${{ needs.application.outputs.tag }}
+      inventory: ${{ needs.application.outputs.inventory_sha256 }}
+      profile: ${{ inputs.profile }}
+      linux_pool: ${{ inputs.linux_pool }}
+      graphics_archive_url: ${{ inputs.graphics_archive_url }}
+      execute: true
+      previous_packages: ${{ inputs.previous_packages }}
+  promotion:
+    name: Revalidate exact certificate and assets before changing Latest
+    if: inputs.execute
+    needs: [application, certification]
+    permissions:
+      contents: write
+      actions: read
+    uses: ./.github/workflows/promote.yml
+    with:
+      tag: ${{ needs.application.outputs.tag }}
+      inventory: ${{ needs.application.outputs.inventory_sha256 }}
+      profile: ${{ inputs.profile }}
+      certification_run: ${{ needs.certification.outputs.certification_run }}
+      certification_attempt: ${{ needs.certification.outputs.certification_attempt }}
+      certificate: ${{ needs.certification.outputs.certificate_sha256 }}
+      execute: true
+  final:
+    name: Verify all required results and the final remote Latest identity
+    if: always()
+    needs: [prepare, regression, application, certification, promotion]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
+    env:
+      STAGE_RESULTS: ${{ toJSON(needs) }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - run: python3 -B tools/latest_release.py verify --output build/latest-verification.json
+    - name: Retain final verification receipt
+      uses: ./.github/actions/ci-evidence-publish
+      with:
+        name: latest-verification-${{ github.run_attempt }}
+        paths: build/latest-verification.json
+    - name: Summarize the exact outcome
+      shell: python
+      run: |
+        import json, os
+        from pathlib import Path
+        value=json.loads(Path('build/latest-verification.json').read_text(encoding='utf-8'))
+        text=('Latest independently verified: '+value['tag'] if value['published'] else
+              'Preparation passed. No public candidate, release certification or Latest change was requested.')
+        with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8') as out:
+          out.write(text+'\n\nSource: `'+value['source_commit']+'`\n\nInventory: `'+value['inventory_sha256']+'`\n')
+    - name: Confirm complete workflow cleanup eligibility
+      if: success() && inputs.execute && !inputs.preserve_artifacts
+      run: echo 'Full Latest publication passed; preceding full-run temporary evidence may be pruned after this run completes.'

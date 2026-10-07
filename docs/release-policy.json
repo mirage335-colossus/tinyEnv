@@ -1,0 +1,793 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "core": {
+      "description": "Exact declared core target inventory; all listed checks are mandatory.",
+      "targets": {
+        "linux-x86_64": [
+          "core"
+        ],
+        "linux-aarch64": [
+          "core"
+        ],
+        "windows-x86_64": [
+          "core"
+        ]
+      },
+      "checks": [
+        {
+          "target": "linux-x86_64",
+          "backend": "core",
+          "environment": "debian-12",
+          "scope": "source"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "core",
+          "environment": "debian-12",
+          "scope": "recovery"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "core",
+          "environment": "debian-12",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "core",
+          "environment": "debian-13",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "core",
+          "environment": "ubuntu-24.04",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "core",
+          "environment": "debian-12",
+          "scope": "abi"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "core",
+          "environment": "debian-12",
+          "scope": "apt"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "core",
+          "environment": "debian-12",
+          "scope": "source"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "core",
+          "environment": "debian-12",
+          "scope": "recovery"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "core",
+          "environment": "debian-12",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "core",
+          "environment": "debian-13",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "core",
+          "environment": "ubuntu-24.04",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "core",
+          "environment": "debian-12",
+          "scope": "abi"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "core",
+          "environment": "debian-12",
+          "scope": "apt"
+        },
+        {
+          "target": "windows-x86_64",
+          "backend": "core",
+          "environment": "windows-2022",
+          "scope": "source"
+        },
+        {
+          "target": "windows-x86_64",
+          "backend": "core",
+          "environment": "windows-2022",
+          "scope": "recovery"
+        },
+        {
+          "target": "windows-x86_64",
+          "backend": "core",
+          "environment": "windows-2022",
+          "scope": "archive"
+        }
+      ]
+    },
+    "all-gui": {
+      "description": "Exact declared all-gui target inventory; all listed checks are mandatory.",
+      "targets": {
+        "linux-x86_64": [
+          "terminal",
+          "framebuffer",
+          "fltk",
+          "rev",
+          "sdl",
+          "hosted-web"
+        ],
+        "linux-aarch64": [
+          "terminal",
+          "framebuffer",
+          "fltk",
+          "rev",
+          "sdl",
+          "hosted-web"
+        ],
+        "windows-x86_64": [
+          "terminal",
+          "framebuffer",
+          "fltk",
+          "rev",
+          "sdl",
+          "hosted-web"
+        ],
+        "browser-wasm32": [
+          "wasm"
+        ]
+      },
+      "checks": [
+        {
+          "target": "linux-x86_64",
+          "backend": "terminal",
+          "environment": "debian-12",
+          "scope": "source"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "terminal",
+          "environment": "debian-12",
+          "scope": "recovery"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "terminal",
+          "environment": "debian-12",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "terminal",
+          "environment": "debian-13",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "terminal",
+          "environment": "ubuntu-24.04",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "terminal",
+          "environment": "debian-12",
+          "scope": "abi"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "terminal",
+          "environment": "debian-12",
+          "scope": "apt"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "framebuffer",
+          "environment": "debian-12",
+          "scope": "source"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "framebuffer",
+          "environment": "debian-12",
+          "scope": "recovery"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "framebuffer",
+          "environment": "debian-12",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "framebuffer",
+          "environment": "debian-13",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "framebuffer",
+          "environment": "ubuntu-24.04",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "framebuffer",
+          "environment": "debian-12",
+          "scope": "abi"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "framebuffer",
+          "environment": "debian-12",
+          "scope": "apt"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "fltk",
+          "environment": "debian-12",
+          "scope": "source"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "fltk",
+          "environment": "debian-12",
+          "scope": "recovery"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "fltk",
+          "environment": "debian-12",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "fltk",
+          "environment": "debian-13",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "fltk",
+          "environment": "ubuntu-24.04",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "fltk",
+          "environment": "debian-12",
+          "scope": "abi"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "fltk",
+          "environment": "debian-12",
+          "scope": "apt"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "rev",
+          "environment": "debian-12",
+          "scope": "source"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "rev",
+          "environment": "debian-12",
+          "scope": "recovery"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "rev",
+          "environment": "debian-12",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "rev",
+          "environment": "debian-13",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "rev",
+          "environment": "ubuntu-24.04",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "rev",
+          "environment": "debian-12",
+          "scope": "abi"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "rev",
+          "environment": "debian-12",
+          "scope": "apt"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "sdl",
+          "environment": "debian-12",
+          "scope": "source"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "sdl",
+          "environment": "debian-12",
+          "scope": "recovery"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "sdl",
+          "environment": "debian-12",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "sdl",
+          "environment": "debian-13",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "sdl",
+          "environment": "ubuntu-24.04",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "sdl",
+          "environment": "debian-12",
+          "scope": "abi"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "sdl",
+          "environment": "debian-12",
+          "scope": "apt"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "hosted-web",
+          "environment": "debian-12",
+          "scope": "source"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "hosted-web",
+          "environment": "debian-12",
+          "scope": "recovery"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "hosted-web",
+          "environment": "debian-12",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "hosted-web",
+          "environment": "debian-13",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "hosted-web",
+          "environment": "ubuntu-24.04",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "hosted-web",
+          "environment": "debian-12",
+          "scope": "abi"
+        },
+        {
+          "target": "linux-x86_64",
+          "backend": "hosted-web",
+          "environment": "debian-12",
+          "scope": "apt"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "terminal",
+          "environment": "debian-12",
+          "scope": "source"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "terminal",
+          "environment": "debian-12",
+          "scope": "recovery"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "terminal",
+          "environment": "debian-12",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "terminal",
+          "environment": "debian-13",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "terminal",
+          "environment": "ubuntu-24.04",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "terminal",
+          "environment": "debian-12",
+          "scope": "abi"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "terminal",
+          "environment": "debian-12",
+          "scope": "apt"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "framebuffer",
+          "environment": "debian-12",
+          "scope": "source"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "framebuffer",
+          "environment": "debian-12",
+          "scope": "recovery"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "framebuffer",
+          "environment": "debian-12",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "framebuffer",
+          "environment": "debian-13",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "framebuffer",
+          "environment": "ubuntu-24.04",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "framebuffer",
+          "environment": "debian-12",
+          "scope": "abi"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "framebuffer",
+          "environment": "debian-12",
+          "scope": "apt"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "fltk",
+          "environment": "debian-12",
+          "scope": "source"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "fltk",
+          "environment": "debian-12",
+          "scope": "recovery"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "fltk",
+          "environment": "debian-12",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "fltk",
+          "environment": "debian-13",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "fltk",
+          "environment": "ubuntu-24.04",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "fltk",
+          "environment": "debian-12",
+          "scope": "abi"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "fltk",
+          "environment": "debian-12",
+          "scope": "apt"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "rev",
+          "environment": "debian-12",
+          "scope": "source"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "rev",
+          "environment": "debian-12",
+          "scope": "recovery"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "rev",
+          "environment": "debian-12",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "rev",
+          "environment": "debian-13",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "rev",
+          "environment": "ubuntu-24.04",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "rev",
+          "environment": "debian-12",
+          "scope": "abi"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "rev",
+          "environment": "debian-12",
+          "scope": "apt"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "sdl",
+          "environment": "debian-12",
+          "scope": "source"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "sdl",
+          "environment": "debian-12",
+          "scope": "recovery"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "sdl",
+          "environment": "debian-12",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "sdl",
+          "environment": "debian-13",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "sdl",
+          "environment": "ubuntu-24.04",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "sdl",
+          "environment": "debian-12",
+          "scope": "abi"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "sdl",
+          "environment": "debian-12",
+          "scope": "apt"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "hosted-web",
+          "environment": "debian-12",
+          "scope": "source"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "hosted-web",
+          "environment": "debian-12",
+          "scope": "recovery"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "hosted-web",
+          "environment": "debian-12",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "hosted-web",
+          "environment": "debian-13",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "hosted-web",
+          "environment": "ubuntu-24.04",
+          "scope": "archive"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "hosted-web",
+          "environment": "debian-12",
+          "scope": "abi"
+        },
+        {
+          "target": "linux-aarch64",
+          "backend": "hosted-web",
+          "environment": "debian-12",
+          "scope": "apt"
+        },
+        {
+          "target": "windows-x86_64",
+          "backend": "terminal",
+          "environment": "windows-2022",
+          "scope": "source"
+        },
+        {
+          "target": "windows-x86_64",
+          "backend": "terminal",
+          "environment": "windows-2022",
+          "scope": "recovery"
+        },
+        {
+          "target": "windows-x86_64",
+          "backend": "terminal",
+          "environment": "windows-2022",
+          "scope": "archive"
+        },
+        {
+          "target": "windows-x86_64",
+          "backend": "framebuffer",
+          "environment": "windows-2022",
+          "scope": "source"
+        },
+        {
+          "target": "windows-x86_64",
+          "backend": "framebuffer",
+          "environment": "windows-2022",
+          "scope": "recovery"
+        },
+        {
+          "target": "windows-x86_64",
+          "backend": "framebuffer",
+          "environment": "windows-2022",
+          "scope": "archive"
+        },
+        {
+          "target": "windows-x86_64",
+          "backend": "fltk",
+          "environment": "windows-2022",
+          "scope": "source"
+        },
+        {
+          "target": "windows-x86_64",
+          "backend": "fltk",
+          "environment": "windows-2022",
+          "scope": "recovery"
+        },
+        {
+          "target": "windows-x86_64",
+          "backend": "fltk",
+          "environment": "windows-2022",
+          "scope": "archive"
+        },
+        {
+          "target": "windows-x86_64",
+          "backend": "rev",
+          "environment": "windows-2022",
+          "scope": "source"
+        },
+        {
+          "target": "windows-x86_64",
+          "backend": "rev",
+          "environment": "windows-2022",
+          "scope": "recovery"
+        },
+        {
+          "target": "windows-x86_64",
+          "backend": "rev",
+          "environment": "windows-2022",
+          "scope": "archive"
+        },
+        {
+          "target": "windows-x86_64",
+          "backend": "sdl",
+          "environment": "windows-2022",
+          "scope": "source"
+        },
+        {
+          "target": "windows-x86_64",
+          "backend": "sdl",
+          "environment": "windows-2022",
+          "scope": "recovery"
+        },
+        {
+          "target": "windows-x86_64",
+          "backend": "sdl",
+          "environment": "windows-2022",
+          "scope": "archive"
+        },
+        {
+          "target": "browser-wasm32",
+          "backend": "wasm",
+          "environment": "firefox",
+          "scope": "source"
+        },
+        {
+          "target": "browser-wasm32",
+          "backend": "wasm",
+          "environment": "firefox",
+          "scope": "recovery"
+        },
+        {
+          "target": "browser-wasm32",
+          "backend": "wasm",
+          "environment": "firefox",
+          "scope": "archive"
+        },
+        {
+          "target": "browser-wasm32",
+          "backend": "wasm",
+          "environment": "chromium",
+          "scope": "archive"
+        },
+        {
+          "target": "windows-x86_64",
+          "backend": "hosted-web",
+          "environment": "windows-2022",
+          "scope": "source"
+        },
+        {
+          "target": "windows-x86_64",
+          "backend": "hosted-web",
+          "environment": "windows-2022",
+          "scope": "archive"
+        },
+        {
+          "target": "windows-x86_64",
+          "backend": "hosted-web",
+          "environment": "windows-2022",
+          "scope": "recovery"
+        }
+      ]
+    }
+  }
+}

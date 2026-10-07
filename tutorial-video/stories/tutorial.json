@@ -1,0 +1,681 @@
+{
+  "title": "Software Foundation · know which file to edit",
+  "fps": 20,
+  "scenes": [
+    {
+      "id": "01-orientation",
+      "kind": "title",
+      "title": "Find the small part that does your work",
+      "sentences": [
+        "A modern codebase contains algorithms, graphical interfaces, device access, build rules, and delivery tools. That volume can make even a simple change hard to locate.",
+        "Software Foundation gives those recurring responsibilities a reusable structure. Use the optional editor or work directly in the source.",
+        "We will follow a small processing application from its button to its algorithm and back to a result, with the exact files visible at every step."
+      ],
+      "eyebrow": "SOFTWARE FOUNDATION / PRACTICAL TUTORIAL",
+      "lines": [
+        "Task → exact file → small function → result",
+        "C · C++ · Rust",
+        "Visual interfaces and processing flows"
+      ],
+      "subtitle": "github.com/mirage335-colossus/software-foundation"
+    },
+    {
+      "id": "02-create-project",
+      "kind": "code",
+      "title": "Create your project; keep a known baseline",
+      "sentences": [
+        "From a foundation checkout, run fork dot sh with your project name and a fresh destination.",
+        "The helper creates an independent repository from the latest main baseline, without a configured remote.",
+        "Read the agent instructions, then ask your coding assistant to work within the existing build, interface, and test structure.",
+        "If you want visual editing, ask it to follow the editor’s project schema, typed event bindings, and block interfaces documented in the editor readme.",
+        "The walkthrough uses copies of the small editor examples so the reference remains intact."
+      ],
+      "eyebrow": "01 / START A PROJECT",
+      "filename": "README.md → Start a new repository",
+      "code": "PROJECT_NAME='my-project' \\\nPROJECT_AUTHOR='your-name' \\\n  ./fork.sh ../my-project\n\ncd ../my-project\n# Read AGENTS.md before asking an assistant to edit.",
+      "callouts": [
+        "Fresh destination directory",
+        "Optional editor: follow editor/README.md",
+        "Ordinary source tools remain available"
+      ]
+    },
+    {
+      "id": "03-working-files",
+      "kind": "filemap",
+      "title": "Four files answer four everyday questions",
+      "sentences": [
+        "Begin in editor, examples, simple C. This is a small application with its own source files.",
+        "To change the calculation, open signal dot C. To change what a button does, open events dot C.",
+        "To arrange controls and connect blocks, edit project dot JSON through the visual editor.",
+        "To add compiled files, edit CMakeLists. You can work on these specific responsibilities while the platform adapters and retained dependency machinery support them underneath."
+      ],
+      "eyebrow": "02 / YOUR EVERYDAY WORKING SET",
+      "path_prefix": "editor/examples/simple-c/",
+      "rows": [
+        {
+          "task": "Change the calculation",
+          "path": "signal.c",
+          "role": "Ordinary C algorithms"
+        },
+        {
+          "task": "Change a button action",
+          "path": "events.c",
+          "role": "Event behavior and UI updates"
+        },
+        {
+          "task": "Arrange controls or wires",
+          "path": "project.json",
+          "role": "Visual composition, edited in Forms / Flows"
+        },
+        {
+          "task": "Compile another file",
+          "path": "CMakeLists.txt",
+          "role": "Explicit compiler inputs"
+        }
+      ],
+      "note": "Follow the task first. Open the file that owns that behavior."
+    },
+    {
+      "id": "04-algorithm-before",
+      "kind": "filefocus",
+      "title": "Here is the entire gain calculation",
+      "sentences": [
+        "This is the actual calculation in signal dot C, at lines twenty through twenty two.",
+        "One sample and a gain go in. Their product comes out.",
+        "With the four source samples one, two, three, and four, a gain of two produces two, four, six, and eight.",
+        "The function contains no window toolkit, workflow service, or editor interface. Its declaration is in signal dot H, and a flow adapter supplies samples to it."
+      ],
+      "eyebrow": "03 / READ THE ALGORITHM",
+      "filename": "editor/examples/simple-c/signal.c",
+      "function": "simple_c_apply_gain",
+      "line_start": 20,
+      "code": [
+        "float simple_c_apply_gain(float sample, float gain) {",
+        "    return sample * gain;",
+        "}"
+      ],
+      "highlight_lines": [
+        21
+      ],
+      "io": {
+        "input": "Samples 1, 2, 3, 4 · gain 2",
+        "output": "2, 4, 6, 8"
+      },
+      "siblings": [
+        {
+          "path": "signal.h",
+          "role": "Declares the function and state"
+        },
+        {
+          "path": "flow_adapter.cpp",
+          "role": "Moves samples through the graph"
+        }
+      ],
+      "change": "Algorithm source: three lines you can understand and test."
+    },
+    {
+      "id": "05-algorithm-change",
+      "kind": "filefocus",
+      "title": "Change one expression; check the result",
+      "sentences": [
+        "For a concrete edit, add one to each amplified sample. Change the return expression in your copy of signal dot C.",
+        "The inputs and gain stay the same. The outputs should now be three, five, seven, and nine.",
+        "The accompanying replay script compiles both versions and checks those exact values.",
+        "When changing the full starter application, update its expected results in main dot C P P as well. A failed old expectation is useful feedback that behavior changed."
+      ],
+      "eyebrow": "04 / ONE EDIT WITH A VISIBLE EFFECT",
+      "filename": "editor/examples/simple-c/signal.c",
+      "function": "simple_c_apply_gain — edited project copy",
+      "line_start": 20,
+      "code": [
+        "float simple_c_apply_gain(float sample, float gain) {",
+        "    return sample * gain + 1.0f;",
+        "}"
+      ],
+      "highlight_lines": [
+        21
+      ],
+      "io": {
+        "input": "Same samples · same gain",
+        "output": "3, 5, 7, 9"
+      },
+      "siblings": [
+        {
+          "path": "main.cpp",
+          "role": "Update the expected values deliberately"
+        },
+        {
+          "path": "signal.h",
+          "role": "Unchanged: the function signature stays the same"
+        }
+      ],
+      "change": "Verified: the copied C function produces the new expected values."
+    },
+    {
+      "id": "06-find-source",
+      "kind": "native",
+      "title": "Use Files and Find to go straight to the function",
+      "sentences": [
+        "You can navigate these files inside the editor. Choose Files, enter the project-relative path, and open it.",
+        "Find the function by name instead of scanning an entire file.",
+        "Here we open events dot C, find the run handler, then open signal dot C and find the gain function. CMakeLists is available in the same file view.",
+        "Double-clicking a bound widget or processing block provides another direct route to its source."
+      ],
+      "eyebrow": "05 / FRESH FILE-NAVIGATION RECORDING",
+      "native": ".work/capture/files-navigation.mp4",
+      "callouts": [
+        "Files → events.c → simple_c_on_run",
+        "Files → signal.c → simple_c_apply_gain",
+        "CMakeLists.txt → compiler inputs"
+      ],
+      "rate": 1.6,
+      "minimum": 40
+    },
+    {
+      "id": "07-event-file",
+      "kind": "filefocus",
+      "title": "The event chooses when the calculation runs",
+      "sentences": [
+        "Events dot C describes the button action. This excerpt sets the processing message, runs the samples, and displays the result.",
+        "The surrounding handler reads the gain choice and manages the enabled state of the Run button.",
+        "Change this file when the sequence of user actions should change. Change signal dot C when the mathematics should change.",
+        "The small C plus plus adapter translates the C callbacks to the shared user interface."
+      ],
+      "eyebrow": "06 / EVENT BEHAVIOR",
+      "filename": "editor/examples/simple-c/events.c",
+      "function": "simple_c_on_run — focused excerpt",
+      "line_start": 28,
+      "code": [
+        "    success = ui->set_output_text(ui->context, \"Processing...\");",
+        "    if (success) success = ui->run_samples(ui->context);",
+        "    if (success) success = simple_c_show_samples(state, ui);",
+        "    if (!success) ui->set_output_text(ui->context, \"Processing failed.\");",
+        "    if (!ui->set_run_enabled(ui->context, 1)) success = 0;",
+        "    return success;"
+      ],
+      "highlight_lines": [
+        29,
+        30
+      ],
+      "siblings": [
+        {
+          "path": "events.h",
+          "role": "Declares C actions and UI callbacks"
+        },
+        {
+          "path": "event_adapter.cpp",
+          "role": "Connects those callbacks to the GUI"
+        },
+        {
+          "path": "signal.c",
+          "role": "Owns the calculation"
+        }
+      ],
+      "io": {
+        "input": "Run samples button",
+        "output": "Updated output text"
+      },
+      "change": "Action sequence in events.c; mathematics in signal.c."
+    },
+    {
+      "id": "08-form",
+      "kind": "native",
+      "title": "Place a widget; retain the layout",
+      "sentences": [
+        "In Forms, choose a widget kind and Add widget. Set its label and position, then Apply.",
+        "This new button is named Reset output.",
+        "The design lives in project dot JSON. Save also writes generated form and event headers.",
+        "Preview shows the layout without running application handlers. A running application combines that layout with the ordinary source files we just located."
+      ],
+      "eyebrow": "07 / project.json THROUGH THE VISUAL EDITOR",
+      "native": ".work/capture/form-widget.mp4",
+      "callouts": [
+        "Forms → Button → Add widget",
+        "Label: Reset output",
+        "Save → design + generated layout"
+      ],
+      "minimum": 25
+    },
+    {
+      "id": "09-new-event",
+      "kind": "native",
+      "title": "Give the new button an ordinary handler",
+      "sentences": [
+        "Choose Activate or click, then Edit code on Reset output. A new binding creates a typed C plus plus handler skeleton.",
+        "Its source path is shown at the top of the code window.",
+        "Include signal dot H, call the ordinary C state initialization function, then set the output text through the UI object.",
+        "Save the source, close the window, and save the design. The accompanying check dispatches this exact generated binding and verifies its result."
+      ],
+      "eyebrow": "08 / src/ui/i_button1_activate.hpp",
+      "native": ".work/capture/new-event.mp4",
+      "trim_start": 3,
+      "minimum": 30,
+      "callouts": [
+        "Header: signal.h",
+        "Call: simple_c_state_init",
+        "Result: cleared state + updated text"
+      ]
+    },
+    {
+      "id": "10-cpp-algorithm",
+      "kind": "filefocus",
+      "title": "C++ keeps the same small-function pattern",
+      "sentences": [
+        "The Simple C plus plus example uses the same organization.",
+        "Its signal dot C P P owns this gain calculation. Events dot C P P owns the button behavior, and services dot H P P holds application state.",
+        "You can write a short procedural function like this, or use classes, templates, and existing libraries.",
+        "The visual layer connects to ordinary source. It does not replace the language or require your algorithm to be written as GUI code."
+      ],
+      "eyebrow": "09 / THE C++ ALTERNATIVE",
+      "filename": "editor/examples/simple/signal.cpp",
+      "function": "starter::apply_gain",
+      "line_start": 14,
+      "code": [
+        "float apply_gain(float sample, float gain) {",
+        "    return sample * gain;",
+        "}"
+      ],
+      "highlight_lines": [
+        15
+      ],
+      "io": {
+        "input": "sample + gain",
+        "output": "processed sample"
+      },
+      "siblings": [
+        {
+          "path": "events.cpp",
+          "role": "Button behavior"
+        },
+        {
+          "path": "services.hpp",
+          "role": "Application state"
+        },
+        {
+          "path": "signal.hpp",
+          "role": "Declarations"
+        }
+      ]
+    },
+    {
+      "id": "11-ownership-map",
+      "kind": "filemap",
+      "title": "Know which layer owns the change",
+      "sentences": [
+        "Think of three layers. Your functions own the behavior. The saved design and generated headers connect the interface and graph. Adapters and toolchains make that application work on its hosts.",
+        "Editing an algorithm usually means changing its source and tests. Adding a platform capability can require the shared contract and adapters.",
+        "Generated files are useful to inspect, but make layout changes in the design so the next generation preserves your intent."
+      ],
+      "eyebrow": "10 / A MAP THROUGH THE LARGER CODEBASE",
+      "rows": [
+        {
+          "task": "Application behavior",
+          "path": "signal.c · events.c",
+          "role": "Your functions and decisions"
+        },
+        {
+          "task": "Visual composition",
+          "path": "project.json",
+          "role": "Controls, bindings, ports and connections"
+        },
+        {
+          "task": "Generated connections",
+          "path": "generated/visual/*.hpp",
+          "role": "Retained compiler inputs written by Save / Generate"
+        },
+        {
+          "task": "Platform support",
+          "path": "gui/ · tools/ · .github/workflows/",
+          "role": "Reusable infrastructure beneath the application"
+        }
+      ],
+      "note": "First three rows: editor/examples/simple-c/. Platform support: repository root."
+    },
+    {
+      "id": "12-add-c-source",
+      "kind": "filefocus",
+      "title": "Add a source file to the correct target",
+      "sentences": [
+        "For another C algorithm, create a source file and its declaration header. Then add the source to the target that compiles your C behavior.",
+        "In Simple C, that target is simple C behavior. C plus plus adapters belong to the application executable target.",
+        "Include the new header in its caller and call the helper. The source list tells the compiler what to build.",
+        "Opening a file in the visual editor alone does not enroll it in compilation. Reconfigure and rebuild after changing the target inputs."
+      ],
+      "eyebrow": "11 / C AND C++ COMPILER INPUTS",
+      "filename": "editor/examples/simple-c/CMakeLists.txt",
+      "function": "Add ordinary translation units — edited excerpt",
+      "line_start": 1,
+      "code": [
+        "# Add offset.c to the existing C library target:",
+        "add_library(simple-c-behavior STATIC",
+        "  signal.c events.c offset.c",
+        " )",
+        "",
+        "# Add a C++ helper to the existing executable:",
+        "target_sources(foundation-editor-simple-c PRIVATE",
+        "  helper.cpp",
+        " )"
+      ],
+      "highlight_lines": [
+        3,
+        8
+      ],
+      "siblings": [
+        {
+          "path": "offset.h + offset.c",
+          "role": "Declaration + implementation for C"
+        },
+        {
+          "path": "helper.hpp + helper.cpp",
+          "role": "Declaration + implementation for C++"
+        }
+      ],
+      "change": "Illustrated additions to the existing targets; headers expose functions, source lists compile them."
+    },
+    {
+      "id": "13-rust-files",
+      "kind": "filemap",
+      "title": "Rust has the same clear working set",
+      "sentences": [
+        "The tutorial includes a separate, small mixed-language example that you can build and run.",
+        "Rust gain dot R S and smoother dot R S hold the processing functions. Lib dot R S declares those modules and exports a small C interface.",
+        "The matching declarations live in F F I dot H. The C plus plus application calls them from an event-style function.",
+        "This makes the algorithm, language boundary, and caller easy to find independently."
+      ],
+      "eyebrow": "12 / ADDING RUST FUNCTIONALITY",
+      "path_prefix": "tutorial-video/examples/language-integration/",
+      "rows": [
+        {
+          "task": "Edit the algorithm",
+          "path": "rust/gain.rs · rust/smoother.rs",
+          "role": "Ordinary Rust functions"
+        },
+        {
+          "task": "Expose the function",
+          "path": "rust/lib.rs",
+          "role": "Modules and C ABI exports"
+        },
+        {
+          "task": "Declare it to C/C++",
+          "path": "rust/ffi.h",
+          "role": "Matching scalar signatures"
+        },
+        {
+          "task": "Call it from behavior",
+          "path": "app.cpp",
+          "role": "Event-style C++ function"
+        }
+      ]
+    },
+    {
+      "id": "14-rust-call",
+      "kind": "filefocus",
+      "title": "Call C and Rust from C++ behavior",
+      "sentences": [
+        "This is the actual caller in the accompanying example. A C helper clips the input. A Rust function applies the gain. Another Rust function smooths the value while C plus plus retains the previous result.",
+        "A GUI handler can call the same functions and then update its widget.",
+        "Our console check calls this event-style function twice and verifies results of two and three. The complete build and checks are retained with the video sources."
+      ],
+      "eyebrow": "13 / A VERIFIED MIXED-LANGUAGE CALL",
+      "filename": "tutorial-video/examples/language-integration/app.cpp",
+      "function": "on_run — event-style processing",
+      "line_start": 16,
+      "code": [
+        "float on_run(Services& services, float input) {",
+        "    const float clipped = processing_clamp(input, -2.0f, 2.0f);",
+        "    const float amplified = tutorial_rust_gain(clipped, services.gain);",
+        "    services.previous = tutorial_rust_smooth(services.previous, amplified, 0.5f);",
+        "    return services.previous;",
+        "}"
+      ],
+      "highlight_lines": [
+        17,
+        18,
+        19
+      ],
+      "io": {
+        "input": "Two successive handler calls",
+        "output": "Run 1: 2.000   Run 2: 3.000"
+      },
+      "siblings": [
+        {
+          "path": "processing.c",
+          "role": "C helper"
+        },
+        {
+          "path": "rust/gain.rs",
+          "role": "Rust gain algorithm"
+        },
+        {
+          "path": "rust/smoother.rs",
+          "role": "Rust smoothing algorithm"
+        }
+      ]
+    },
+    {
+      "id": "15-add-rust-source",
+      "kind": "code",
+      "title": "Add a Rust module and its build dependency",
+      "sentences": [
+        "Here, smoother dot R S is the added Rust file. Declare its module in lib dot R S, and export the function through the C interface.",
+        "Include its matching declaration from F F I dot H in the caller. The CMake rule compiles a static archive and links it into the application.",
+        "List the new module in that rule’s dependencies so edits trigger a rebuild. Run these commands from the language integration example directory.",
+        "Keep types and ownership explicit at the language boundary. For Foundation applications on other targets, follow the documented target-matched SDK route."
+      ],
+      "eyebrow": "14 / RUST MODULE → ARCHIVE → APPLICATION",
+      "filename": "tutorial-video/examples/language-integration/",
+      "code": [
+        "// rust/lib.rs: add the smoother module",
+        "mod gain;",
+        "mod smoother;",
+        "",
+        "# CMakeLists.txt: keep every module in DEPENDS",
+        "DEPENDS rust/lib.rs rust/gain.rs rust/smoother.rs",
+        "target_link_libraries(tutorial-integration PRIVATE tutorial_rust)",
+        "",
+        "# Configure and build the supplied independent example:",
+        "cmake -S . -B build -G Ninja",
+        "cmake --build build --parallel 2",
+        "./build/tutorial-integration"
+      ],
+      "callouts": [
+        "New module file",
+        "mod declaration",
+        "Build dependency + linked archive"
+      ]
+    },
+    {
+      "id": "16-rust-dsp",
+      "kind": "native",
+      "title": "Follow a processing block into Rust",
+      "sentences": [
+        "The Rust DSP project provides a larger algorithm example. Double-click the processing block to open D S P dot R S, and locate process samples.",
+        "That function owns the filter mathematics and state across chunks. It applies a three-tap filter and decimates by two.",
+        "D S P dot H declares the interface. Flow adapter dot C P P translates stream buffers into calls.",
+        "Change the algorithm in the Rust file, and change the graph composition in the visual flow."
+      ],
+      "eyebrow": "15 / editor/examples/rust-dsp/dsp.rs",
+      "native": ".work/capture/rust-source.mp4",
+      "callouts": [
+        "dsp.rs → filtering and state",
+        "dsp.h → C ABI declaration",
+        "flow_adapter.cpp → stream integration"
+      ]
+    },
+    {
+      "id": "17-visual-flows",
+      "kind": "native",
+      "title": "Wire several inputs and outputs",
+      "sentences": [
+        "Advanced MIMO demonstrates two inputs and four independently accounted outputs.",
+        "The Ports and source panel identifies the block factory, source file, and typed ports. The graph connects an output to an input of the same type.",
+        "Each port can consume or produce a different number of values. Bounded queues provide backpressure.",
+        "You can use this structure for signal processing, computer vision, and other continuing data work, with your own algorithms behind the blocks."
+      ],
+      "eyebrow": "16 / SOURCE PATHS, PORTS AND CONNECTIONS",
+      "native": ".work/capture/mimo-tutorial.mp4",
+      "minimum": 32,
+      "callouts": [
+        "blocks.cpp → processing block",
+        "blocks.hpp → factory declarations",
+        "project.json → connections"
+      ]
+    },
+    {
+      "id": "18-main-app",
+      "kind": "filemap",
+      "title": "Find the equivalent files in the main application",
+      "sentences": [
+        "The starter examples are teaching projects. The repository’s main Entry list application has its own corresponding files.",
+        "The record behavior is in source, store dot C P P, with its public interface under include.",
+        "Shared application actions live in the GUI shared application file. Its widget definition lives beside it.",
+        "The default Rust validator is under Rust, text validation, source, lib dot R S. Use the architecture document to locate the equivalent responsibility as your application grows."
+      ],
+      "eyebrow": "17 / THE MAIN APPLICATION, SEPARATE FROM THE STARTERS",
+      "rows": [
+        {
+          "task": "Core record behavior",
+          "path": "src/store.cpp",
+          "role": "Interface: include/foundation/store.hpp"
+        },
+        {
+          "task": "Shared GUI actions",
+          "path": "gui/shared/application.cpp",
+          "role": "Application behavior above the backends"
+        },
+        {
+          "task": "Shared widget layout",
+          "path": "gui/shared/view_definition.hpp",
+          "role": "Main example’s handwritten widget definition"
+        },
+        {
+          "task": "Default Rust validator",
+          "path": "rust/text_validation/src/lib.rs",
+          "role": "Private text-validation component"
+        }
+      ],
+      "note": "The Forms editor edits its design JSON; it does not import arbitrary handwritten layouts."
+    },
+    {
+      "id": "19-documents",
+      "kind": "native",
+      "title": "Explore the change, then the exact source",
+      "eyebrow": "documentation-tool/published/index.html",
+      "native": ".work/capture/documentation-html.mp4",
+      "minimum": 40.05,
+      "sentences": [
+        "Open documentation tool, published, index dot HTML in a local browser. The included explorer needs no web server, AI service, or documentation rebuild.",
+        "Choose Add a widget and click handler, then Declare the widget. The panel explains what to change, why, the exact file, and a source example.",
+        "Parameter guides help decode dense declarations. Add a source file to the compiler leads to the target that owns your code.",
+        "This snapshot maps the main application we just located. Its capture date is shown; compare it with current source when making changes."
+      ],
+      "callouts": [
+        "Edit task → specific step → source",
+        "Parameter guides → readable fields",
+        "Snapshot: 2026-10-04 · main application"
+      ]
+    },
+    {
+      "id": "19b-documentation-pdfs",
+      "kind": "native",
+      "title": "Use the matching PDF collection",
+      "eyebrow": "documentation-tool/published/pdf/",
+      "native": ".work/capture/documentation-pdf.mp4",
+      "minimum": 37.05,
+      "sentences": [
+        "The explorer also links to corresponding PDFs. Edit paths contains the widget and source-file recipes. Compiler reference contains the target declarations.",
+        "The remaining volumes cover code walkthroughs, execution flows, code flowcharts, and a separately labeled AI-authored GUI mental model.",
+        "Keep the published folder together so local links can work. PDF navigation depends on the viewer.",
+        "For current instructions, use docs slash readme as the topic index and the editor readme for its separate visual-project workflow."
+      ],
+      "callouts": [
+        "00-edit-paths.pdf → what to change",
+        "Compiler reference PDF → build targets",
+        "HTML + six PDF volumes, available locally"
+      ]
+    },
+    {
+      "id": "20-build-sdk",
+      "kind": "code",
+      "title": "Build with known tools and retained inputs",
+      "sentences": [
+        "The default application combines C plus plus with Rust. Follow the listed host prerequisites, then use build dot sh and the focused core check.",
+        "For controlled or offline work, restore the verified, target-matched SDK inputs before building.",
+        "These retain toolchains, dependencies, source, and integrity records, reducing reliance on future upstream availability.",
+        "The application shares behavior across seven GUI hosts. The optional editor has its own FLTK, Rev, and SDL framebuffer hosts and qualification record."
+      ],
+      "eyebrow": "19 / PORTABLE BUILDS AND MULTIPLE GUI HOSTS",
+      "filename": "COMPILE · COMPILE-gui · COMPILE-editor",
+      "code": [
+        "./build.sh",
+        "./build.sh test dev --label core",
+        "",
+        "# Use a verified Rust extension when the target requires it:",
+        "./build.sh test dev --rust-sdk /path/to/rust-sdk --label core",
+        "",
+        "# Optional native editor:",
+        "./build.sh editor build dev --backend fltk \\",
+        "  --build-dir build/editor-fltk",
+        "./build/editor-fltk/foundation-editor-fltk"
+      ],
+      "callouts": [
+        "CLI + native windows",
+        "Hosted browser + WebAssembly",
+        "Framebuffer + terminal"
+      ]
+    },
+    {
+      "id": "21-latest-packages",
+      "kind": "delivery",
+      "title": "Your CI-built Latest release is the package repository",
+      "sentences": [
+        "Software Foundation connects systems that are usually maintained separately.",
+        "GitHub Actions builds and checks the application, creates native packages, and formats signed repository indexes as release assets.",
+        "A P T and pacman point directly to the project’s GitHub Latest download root. Normal operating-system package updates discover the promoted release and fetch its packages there.",
+        "Gentoo follows Latest through the verified Portage adapter. This delivery route needs no independent package-repository server. The installed and distribution guides provide the exact client setup."
+      ],
+      "eyebrow": "20 / CI → RELEASE ASSETS → THE USER’S PACKAGE MANAGER",
+      "steps": [
+        {
+          "label": "GitHub Actions",
+          "path": ".github/workflows/",
+          "detail": "Build, check, package and sign"
+        },
+        {
+          "label": "GitHub Latest",
+          "path": "releases/latest/download/",
+          "detail": "Packages + signed native indexes"
+        },
+        {
+          "label": "OS package manager",
+          "path": "APT · pacman · Portage adapter",
+          "detail": "Discover and fetch the new release"
+        }
+      ],
+      "package_managers": [
+        "APT: apt-get update",
+        "Arch: pacman -Syu",
+        "Gentoo: verified Latest sync"
+      ],
+      "note": "No independent package-repository server to operate."
+    },
+    {
+      "id": "22-daily-loop",
+      "kind": "title",
+      "title": "Make the next change easy to find",
+      "sentences": [
+        "The daily loop is concrete. Name the behavior, open its owning file, change the small function or visual composition, and check the result.",
+        "Save or generate after layout and wiring changes. Rebuild after source changes. Keep expected values and failure cases explicit.",
+        "The optional editor, local documentation, and prepared toolchains also support continued development when frontier AI providers are down.",
+        "Future projects repeatedly need these capabilities. People and AI agents can begin with the connections established and concentrate on their project’s important work."
+      ],
+      "eyebrow": "SOFTWARE FOUNDATION / FROM A TASK TO A VERIFIED RESULT",
+      "lines": [
+        "Behavior → owning file → checked result",
+        "Optional visual tools + ordinary source",
+        "Continue locally during AI-provider downtime"
+      ],
+      "subtitle": "github.com/mirage335-colossus/software-foundation"
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+name: Independently verify retained opaque archives
+on:
+  workflow_dispatch:
+    inputs:
+      pointer:
+        description: Exact legacy-preservation bundle pointer JSON
+        type: string
+        required: true
+      artifacts:
+        description: Exact original artifact requests JSON list
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      PRESERVATION_POINTER: ${{ inputs.pointer }}
+      LEGACY_ARTIFACTS: ${{ inputs.artifacts }}
+    outputs:
+      pointer: ${{ steps.verify.outputs.pointer }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - id: verify
+      name: Fetch exact completed preservation and verify every opaque archive sequentially
+      run: python3 -B tools/verify_legacy_preservation.py --output build/retention-verification
+    - name: Report durable partial verification pointers
+      if: failure()
+      shell: python
+      run: |
+        import json, os
+        from pathlib import Path
+        with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as stream:
+          stream.write('Verification incomplete. Completed receipts remain in private draft bundles; no original artifacts were deleted.\n')
+          for path in sorted(Path('build/retention-verification/receipts').glob('checkpoint-*.json')):
+            stream.write('Verified subset pointer: `' + json.dumps(json.loads(path.read_text(encoding='utf-8')), sort_keys=True) + '`\n')

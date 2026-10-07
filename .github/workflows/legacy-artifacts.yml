@@ -1,0 +1,43 @@
+name: Explicit opaque legacy artifact preservation
+on:
+  workflow_dispatch:
+    inputs:
+      artifacts:
+        description: Exact JSON list of artifact_id, sha256, run_id, source_commit, name and size
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  preserve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      LEGACY_ARTIFACTS: ${{ inputs.artifacts }}
+    outputs:
+      pointer: ${{ steps.preserve.outputs.pointer }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - id: preserve
+      name: Verify exact original bytes and retain private draft bundles
+      run: python3 -B tools/legacy_artifacts.py --output build/legacy-preservation
+    - name: Report partial-preservation pointers without claiming completion
+      if: failure()
+      shell: python
+      run: |
+        import json, os
+        from pathlib import Path
+        with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8') as out:
+          out.write('Preservation incomplete. Existing verified per-archive bundles remain recoverable; nothing was deleted.\n')
+          for path in sorted(Path('build/legacy-preservation').glob('artifact-*.json')):
+            value=json.loads(path.read_text(encoding='utf-8'))
+            out.write('Completed pointer: `'+json.dumps(value['pointer'],sort_keys=True)+'`\n')

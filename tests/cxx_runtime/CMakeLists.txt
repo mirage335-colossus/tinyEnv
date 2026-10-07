@@ -1,0 +1,52 @@
+cmake_minimum_required(VERSION 3.24)
+project(FoundationRuntimeFixture LANGUAGES CXX)
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  message(FATAL_ERROR "The runtime/plugin fixture requires Linux")
+endif()
+include("${FOUNDATION_SOURCE}/cmake/StaticCxxRuntime.cmake")
+foundation_require_static_gnu_runtime()
+add_library(host_plugin MODULE plugin.cpp)
+target_compile_features(host_plugin PRIVATE cxx_std_17)
+if(MODE STREQUAL "package")
+  # A real installed archive using the production exported runtime helper.
+  include(CMakePackageConfigHelpers)
+  add_library(foundation_core STATIC "${FOUNDATION_SOURCE}/src/store.cpp"
+    "${FOUNDATION_SOURCE}/src/text_validation.cpp")
+  target_compile_features(foundation_core PUBLIC cxx_std_20)
+  target_include_directories(foundation_core PUBLIC
+    "$<BUILD_INTERFACE:${FOUNDATION_SOURCE}/include>" "$<INSTALL_INTERFACE:include>")
+  set_target_properties(foundation_core PROPERTIES EXPORT_NAME core)
+  install(TARGETS foundation_core EXPORT FoundationTargets ARCHIVE DESTINATION lib)
+  install(EXPORT FoundationTargets NAMESPACE foundation:: DESTINATION lib/cmake/Foundation)
+  install(FILES "${FOUNDATION_SOURCE}/include/foundation/store.hpp" DESTINATION include/foundation)
+  set(FOUNDATION_PORTABLE ON)
+  set(FOUNDATION_CORE_PROVIDER cpp)
+  configure_package_config_file("${FOUNDATION_SOURCE}/cmake/FoundationConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/FoundationConfig.cmake" INSTALL_DESTINATION lib/cmake/Foundation)
+  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/FoundationConfig.cmake"
+    "${FOUNDATION_SOURCE}/cmake/StaticCxxRuntime.cmake" DESTINATION lib/cmake/Foundation)
+else()
+  add_executable(runtime_probe main.cpp)
+  target_compile_features(runtime_probe PRIVATE cxx_std_17)
+  target_link_libraries(runtime_probe PRIVATE ${CMAKE_DL_LIBS})
+  # An application may intentionally export its own plugin API. The C++ runtime
+  # must stay private even when this option would normally expose its symbols.
+  target_link_options(runtime_probe PRIVATE "LINKER:--export-dynamic" "LINKER:--disable-new-dtags")
+  set_target_properties(runtime_probe PROPERTIES INSTALL_RPATH "$ORIGIN/../lib")
+  if(MODE STREQUAL "protected")
+    foundation_link_static_gnu_runtime(runtime_probe PRIVATE)
+    # Match the broader application policy: every linked archive stays private,
+    # including GUI/toolkit dependencies, while direct plugin API objects export.
+    target_link_options(runtime_probe PRIVATE "LINKER:--exclude-libs,ALL")
+  elseif(MODE STREQUAL "unprotected")
+    target_link_options(runtime_probe PRIVATE -static-libstdc++ -static-libgcc)
+  elseif(MODE STREQUAL "installed")
+    find_package(Foundation REQUIRED CONFIG)
+    target_link_libraries(runtime_probe PRIVATE foundation::core)
+    target_compile_definitions(runtime_probe PRIVATE FOUNDATION_CONSUMER=1)
+    foundation_apply_runtime(runtime_probe)
+  elseif(NOT MODE STREQUAL "dynamic")
+    message(FATAL_ERROR "Unknown runtime fixture mode")
+  endif()
+  install(TARGETS runtime_probe RUNTIME DESTINATION bin)
+endif()

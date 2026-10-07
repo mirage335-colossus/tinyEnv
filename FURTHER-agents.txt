@@ -1,0 +1,37 @@
+Further improvements to this example
+===================================
+
+Keep only improvements that would substantially improve this example as a starting
+point after accounting for complexity, maintenance and fragility. Reducing GitHub
+Actions time to qualified binary releases is a high priority. Possible usefulness
+only to a derived project, hypothetical growth or marginal savings is insufficient.
+Entries are proposals, not pending qualification or authorization to execute.
+
+Bounded retries for interrupted release-asset downloads
+------------------------------------------------------
+
+Close the narrow transport-retry gap in tools/github_release.py: selected HTTP
+failures already retry, but interrupted connections and incomplete transfers can
+fail immediately in the custom public and authenticated download paths. These
+reads occur even during final release verification, so a brief transfer failure
+can leave an otherwise completed, roughly hour-long release workflow red.
+
+Retry explicitly classified transient connection failures, timeouts and truncated
+transfers within the existing attempt, backoff and total deadline budgets. Discard
+partial downloads before each attempt and accept bytes only after the existing
+size, digest and identity checks pass. Preserve rejection of invalid identities,
+unsafe redirects, complete-but-corrupt payloads and permanent failures. Avoid
+broadly retrying every DeliveryError, multiplying nested retry budgets, replaying
+release mutations or automatically restarting workflows. Keep this scoped to
+transfer recovery; it does not require cross-run build reuse.
+
+Add deterministic fault-injection tests for interruption followed by success,
+repeated interruption exhausting the budget, partial-file cleanup, and permanent
+or integrity failures remaining rejected. Cover both custom download paths and
+preserve existing HTTP retry behavior. Healthy transfers should incur no added
+waits or workflow stages.
+
+Planning estimate: 45-90 minutes for implementation and focused tests, plus about
+60-70 minutes for one complete hosted release validation when authorized. The
+benefit is avoiding occasional expensive recovery runs, not shortening healthy
+releases; a late failure followed by a complete rerun can add roughly an hour.

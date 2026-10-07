@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "scope": "Application builds from complete retained inputs; compiler reconstruction is separate maintenance.",
+  "native_backends": ["terminal", "framebuffer", "fltk", "rev", "sdl", "hosted-web"],
+  "source_inputs": ["checkout", "third_party/gui-inputs", "patches", "fonts", "notices"],
+  "group_inputs": ["binary archive", "source/bootstrap archive", "complete SHA256SUMS"],
+  "core_providers": {"default": "rust", "optional": ["cpp"], "automatic_fallback": false},
+  "plan_schema": {"current": 2, "schema_1_requires_explicit_provider": true},
+  "rust_extension": {"manifest": "rust-sdk.json", "plan_fields": ["core_provider", "rust_group", "rust_recipe"], "separate_from_cpp_sdk": true, "rust_minimum": "1.63", "cargo_version": "exact inventoried baseline-compatible executable", "edition": "2021", "lockfile_version": 3, "external_application_crates": false, "paired_target_and_host_required": true, "offline_environment": ["fresh CARGO_HOME", "fresh RUSTUP_HOME", "CARGO_NET_OFFLINE=true", "no ambient Rust flags or wrappers"]},
+  "distribution_host_tools": {
+    "common": ["sh", "python3", "git", "cmake", "ninja"],
+    "native_sdk": ["readelf", "pkg-config", "dpkg-query"],
+    "relocation": ["bash", "sed", "find", "grep", "xargs", "dirname", "readlink"],
+    "namespace_setup": ["unshare", "mount", "chroot", "setpriv", "ip"]
+  },
+  "retained_host_tools": {
+    "native": ["compiler", "linker", "sysroot", "toolkits", "declared sdk.json host_tools", "pkg-config when retained"],
+    "wasm": ["Emscripten", "LLVM", "Binaryen", "Node", "prepared EM_CACHE", "notices"],
+    "rust": ["matched rustc and cargo", "compiler sysroot", "target core and compiler-builtins libraries", "complete rust-sdk.json file inventory", "binary/source-bootstrap group and complete checksums", "supplier notices"]
+  },
+  "validation_prerequisites": {
+    "native_gui": ["display/OpenGL runtime", "Xvfb", "xauth", "Node for JavaScript tests"],
+    "browser": ["separately installed Chromium/driver and Firefox"],
+    "package_distribution": ["separately retained signing/package tools"]
+  },
+  "targets": [
+    {"target": "linux-x86_64", "host_system": "Linux", "host_processor": "x86_64", "os": "debian-12", "backends": ["terminal", "framebuffer", "fltk", "rev", "sdl", "hosted-web"], "core_cli": true, "sdk_target_system": "Linux", "sdk_processor": "x86_64", "python_minimum": "3.9", "acceptance": "bookworm-isolated"},
+    {"target": "linux-aarch64", "host_system": "Linux", "host_processor": "aarch64", "os": "debian-12", "backends": ["terminal", "framebuffer", "fltk", "rev", "sdl", "hosted-web"], "core_cli": true, "sdk_target_system": "Linux", "sdk_processor": "aarch64", "python_minimum": "3.9", "acceptance": "bookworm-isolated"},
+    {"target": "browser-wasm32", "host_system": "Linux", "host_processor": "x86_64", "os": "debian-12", "backends": ["wasm"], "core_cli": true, "sdk_target_system": "Emscripten", "sdk_processor": "wasm32", "python_minimum": "3.10", "acceptance": "bookworm-isolated"},
+    {"target": "windows-x86_64", "host_system": "Windows", "host_processor": "x86_64", "backends": ["terminal", "framebuffer", "fltk", "rev", "sdl", "hosted-web"], "core_cli": true, "sdk_target_system": "Windows", "sdk_processor": "x86_64", "acceptance": "native-windows", "separate_prerequisites": ["complete Microsoft offline compiler/Windows SDK installer layout and component configuration", "installed v143 compiler and selected Windows SDK", "Python", "CMake", "Ninja", "Git", "retained host graphics for Rev qualification"]}
+  ],
+  "ordinary_distribution_route": {"retained_sdk_required": false, "inputs": ["checkout", "complete GUI source group when enabled", "selected distribution build/toolkit package closure", "Debian-family package-owned Rust compiler, Cargo, target libraries and notices for native dev; other profiles require the retained Rust extension"], "core_minimum": {"python": "3.9", "cmake": "3.24", "compiler": "C++20", "rust": "1.63"}, "rev_minimum": {"cmake": "3.28", "compiler": "GCC 15 or Clang 19 plus matching scanner"}},
+  "acceptance_limits": ["Browser security tests are separate real-browser execution.", "An unavailable host target is pending, never passed.", "Recipe URLs and hashes without retained contents are not offline inputs."]
+}

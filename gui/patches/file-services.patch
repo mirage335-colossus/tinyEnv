@@ -1,0 +1,47 @@
+--- include/gui/runtime.hpp
++++ include/gui/runtime.hpp
+@@ -20,7 +20,7 @@
+ 
+ namespace gui {
+ 
+-enum class ServiceKind { open_file, save_file, prompt, clipboard_write, open_location };
++enum class ServiceKind { open_file, save_file, prompt, clipboard_write, open_location, read_text, write_text };
+ enum class ServiceStatus { success, cancelled, error };
+ 
+ struct ServiceRequest {
+@@ -29,7 +29,10 @@
+     std::string title;
+     std::string value;
+     // For prompts and file selections, limits the UTF-8 bytes in defaults/replies.
+-    // Output-only services do not apply this text-input limit.
++    // read_text returns owned UTF-8 content; write_text hands owned content to
++    // the host. Success for write_text means accepted/offered, not disk durability.
++    // These content services always enforce a maximum of 64 KiB.
++    // Other output-only services do not apply this text-input limit.
+     std::size_t byte_limit = 32768;
+ };
+ 
+@@ -51,9 +54,11 @@
+     switch (kind) {
+         case ServiceKind::prompt:
+         case ServiceKind::open_file:
+-        case ServiceKind::save_file: return true;
++        case ServiceKind::save_file:
++        case ServiceKind::read_text: return true;
+         case ServiceKind::clipboard_write:
+-        case ServiceKind::open_location: return false;
++        case ServiceKind::open_location:
++        case ServiceKind::write_text: return false;
+     }
+     throw std::invalid_argument("Unknown service kind.");
+ }
+@@ -79,6 +84,9 @@
+     bool enqueue(ServiceRequest request) {
+         if (closed_ || accepted_ids_.contains(request.id)) return false;
+         const bool has_input = runtime_detail::input_service(request.kind);
++        if ((request.kind == ServiceKind::read_text || request.kind == ServiceKind::write_text) &&
++            (request.byte_limit > 65536 || request.value.size() > request.byte_limit))
++            throw std::length_error("File content exceeds the 64 KiB service limit");
+         const auto unlimited = std::numeric_limits<std::size_t>::max();
+         if (const auto error = runtime_detail::text_error(request.title, unlimited, true);
+             !error.empty()) throw std::invalid_argument(error);

@@ -1,0 +1,69 @@
+.TH SOFTWARE-FOUNDATION 7 "October 2026" "software-foundation 0.1.0" "Miscellaneous Information"
+.SH NAME
+software-foundation \- installed application and developer package guide
+.SH DESCRIPTION
+This general-purpose reference separates application behavior, platform services,
+GUI adapters, prepared build inputs and release verification.
+The installed CLI demonstrates bounded input, failure atomicity and stable records.
+.SH PACKAGE CONTENTS
+.TP
+.B bin/
+Command-line executable and any selected native GUI hosts.
+.TP
+.B include/foundation/
+Public C++ library interfaces and the package version.
+.TP
+.B lib/cmake/Foundation/
+Installed CMake package configuration and imported targets.
+Library directory spelling may follow the selected platform convention.
+.TP
+.B lib/runtime/
+Private redistributable runtime dependencies, when required.
+Host loaders and system services are not replacement package libraries.
+.TP
+.B share/doc/Foundation/
+Notices, dependency inventory, build information and installed instructions.
+.TP
+.B share/man/
+These manual pages. A manual reader is not needed to build or install them.
+.TP
+.B share/software-foundation/web/
+Installed assets for enabled browser frontends.
+.SH GUI FRONTENDS
+Terminal, framebuffer, FLTK, Rev, SDL, hosted web and compiled WebAssembly hosts
+consume the same application-owned widget definitions and event handling.
+Enabled hosts are recorded in the package build information.
+Adding an application feature through existing widget capabilities changes the
+shared application definition. A new backend capability requires extending its
+generic contract and conformance checks.
+.PP
+Native display backends require the corresponding host display services.
+Browser frontends use an ordinary supported system browser. The compiler SDK
+does not supply a desktop browser. Browser tests and compiler tools have separate
+dependency and update policies.
+.SH DEVELOPER USE
+Use CMake find_package(Foundation CONFIG REQUIRED), link foundation::core,
+and apply foundation_apply_runtime to the consuming target. Use a compiler,
+runtime and target environment compatible with the recorded SDK.
+A static library does not promise a compiler-independent binary interface.
+.SH INSTALLATION AND REMOVAL
+Extract portable archives into a new directory and keep all files together.
+Run the packaged self-check outside the source checkout. Remove that complete
+private directory to uninstall an archive; preserve user-owned data separately.
+.PP
+Use the native package manager to install and remove managed packages.
+Backend variants occupy separate private installation directories. Their public
+launchers and manual aliases identify the variant so several can coexist.
+.SH RELEASE INPUTS
+An application release retains the exact prepared SDK and dependency groups it
+used, including source inputs, recipe identity and complete checksums.
+Ordinary builds consume those retained inputs without downloading replacements.
+SDK maintenance is a separate explicit operation. Qualification must test the
+actual delivered archive and recovery when the original base is unavailable.
+.SH SUPPORT EVIDENCE
+The matching source release contains compatibility requirements, validation
+records and the complete documentation index. A successful check on one host
+does not qualify another operating system or processor. Consult the release's
+actual evidence before relying on a declared target.
+.SH SEE ALSO
+.BR foundation-cli (1)

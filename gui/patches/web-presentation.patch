@@ -1,0 +1,67 @@
+--- boot.mjs
++++ boot.mjs
+@@ -1,5 +1,6 @@
+ import {Client,Renderer,executeService} from './renderer.mjs';
+ import {startPolling} from './browser_lifecycle.mjs';
++import {createBrowserPresenter} from './browser_presenter.mjs';
+ import {createWasmTransport} from './wasm_transport.mjs';
+ const status=document.querySelector('#status'), retry=document.querySelector('#retry');
+ let wasmTransport=null,client=null;
+@@ -29,30 +30,48 @@
+     };
+   }
+   if(lifetime.signal.aborted){release();throw Error('Application closed during startup');}
+-  let renderer,serviceId=null;
++  let renderer,presenter,serviceId=null,serviceLifetime=null;
+   client=new Client(exchange,state=>{
+-    renderer.render(state.snapshot);
+-    if(state.service&&state.service.id!==serviceId){serviceId=state.service.id;
++    // Receipts/state are already accepted by Client; only painting may wait.
++    renderer.acceptSnapshot(state.snapshot);
++    presenter.accept(state);
++    if ((state.service?.id ?? null) !== serviceId || state.snapshot.closed) {
++      serviceLifetime?.abort(); serviceLifetime = null;
++    }
++    if(state.service&&!state.snapshot.closed&&state.service.id!==serviceId){serviceId=state.service.id;
++      const requestLifetime = serviceLifetime = new AbortController();
++      const abort = () => requestLifetime.abort();
++      lifetime.signal.addEventListener('abort',abort,{once:true});
++      let timer=null;
++      requestLifetime.signal.addEventListener('abort',()=>{
++        if(timer!==null){clearTimeout(timer);timer=null;}
++        lifetime.signal.removeEventListener('abort',abort);
++      },{once:true});
+       // Defer the DOM prompt until the current snapshot has been painted.
+-      setTimeout(async()=>{
++      timer=setTimeout(async()=>{
++        timer=null;
+         let result;
+-        try{if(lifetime.signal.aborted)return;result=await executeService(state.service,{document,signal:lifetime.signal});}catch(error){result={type:'service',id:state.service.id,status:'error',value:'',error:error.message||'Prompt failed'};}
+-        if(lifetime.signal.aborted)return;
++        try{if(requestLifetime.signal.aborted)return;result=await executeService(state.service,{document,signal:requestLifetime.signal,exchange:operation=>client.send(operation)});}catch(error){result={type:'service',id:state.service.id,status:'error',value:'',error:error.message||'Prompt failed'};}
++        finally{lifetime.signal.removeEventListener('abort',abort);}
++        if(requestLifetime.signal.aborted)return;
+         client.send(result).catch(error=>setStatus(error.message));
+       },0);
+     }
++    serviceId=state.service?.id??null;
+   },setStatus);
+   renderer=new Renderer(document.querySelector('#stage'),document.querySelector('#pages'),(operation,coalesce)=>client.send(operation,coalesce));
++  presenter=createBrowserPresenter(snapshot=>renderer.render(snapshot));
++  let stopPolling=()=>{},observer=null;
++  teardown=()=>{stopPolling();observer?.disconnect();serviceLifetime?.abort();presenter.close();renderer.destroy();client.close();};
+   client.accept(initial);client.pump();
+   const viewport=document.querySelector('#viewport');
+   let previousSize='';
+-  const observer=new ResizeObserver(()=>{
++  observer=new ResizeObserver(()=>{
+     const width=Math.min(4096,Math.max(0,Math.round(viewport.clientWidth))),height=Math.min(4096,Math.max(0,Math.round(viewport.clientHeight)));
+     const scale=Math.min(4,window.devicePixelRatio||1),signature=JSON.stringify([width,height,scale]);
+     if(signature!==previousSize){previousSize=signature;client.send({type:'resize',width,height,scale},'resize').catch(error=>setStatus(error.message));}
+   });observer.observe(viewport);
+-  const stopPolling=startPolling(client);
+-  teardown=()=>{stopPolling();observer.disconnect();client.close();};
++  stopPolling=startPolling(client);
+   // A restored document needs a new application session and event listeners.
+   window.addEventListener('pageshow',event=>{if(event.persisted)location.reload();});
+   setStatus(`${wasm?'Wasm':'Hosted C++'} · shared layout, retained browser controls`);

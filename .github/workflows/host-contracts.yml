@@ -1,0 +1,74 @@
+name: Host contract diagnostics
+run-name: Host ${{ inputs.target }} / Python ${{ inputs.interpreter }} / ${{ inputs.suite }} / ${{ inputs.repetitions }} repetitions
+'on':
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Native runner target
+        type: choice
+        default: windows-x86_64
+        options: [windows-x86_64, linux-x86_64, linux-aarch64]
+      suite:
+        description: Complete registered suite or opt-in Windows host probes
+        type: choice
+        default: process_tree
+        options: [process_tree, windows_graphics, ci_plan, github_release, ci_transport, latest_release, windows_hosts, agent_board, test_plan, ci_retry, package_wasm, import_wasm]
+      interpreter:
+        description: Already installed Python; explicit versions require the runner cache
+        type: choice
+        default: runner-default
+        options: [runner-default, '3.12', '3.14']
+      repetitions:
+        description: Keep every repetition; any failure fails the diagnostic
+        type: choice
+        default: '1'
+        options: ['1', '5', '20']
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ${{ inputs.target == 'windows-x86_64' && 'windows-2022' || inputs.target == 'linux-aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    # Execution is capped at 50 minutes; leave bounded headroom for evidence transport.
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      actions: read
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - if: inputs.target == 'windows-x86_64' && contains(fromJSON('["windows_hosts", "test_plan", "ci_retry", "package_wasm", "import_wasm"]'), inputs.suite)
+      name: Select the installed native compiler for host probes
+      shell: pwsh
+      run: ./tools/ci_windows.ps1 -Output build/host-contracts-toolchain.json
+    - name: Run complete repetitions under the selected installed interpreter
+      shell: python
+      env:
+        DIAGNOSTIC_TARGET: ${{ inputs.target }}
+        DIAGNOSTIC_SUITE: ${{ inputs.suite }}
+        DIAGNOSTIC_INTERPRETER: ${{ inputs.interpreter }}
+        DIAGNOSTIC_REPETITIONS: ${{ inputs.repetitions }}
+      run: |
+        import os, subprocess, sys
+        subprocess.run([sys.executable, '-B', 'tools/host_contracts.py',
+            '--target', os.environ['DIAGNOSTIC_TARGET'],
+            '--suite', os.environ['DIAGNOSTIC_SUITE'],
+            '--interpreter', os.environ['DIAGNOSTIC_INTERPRETER'],
+            '--repetitions', os.environ['DIAGNOSTIC_REPETITIONS'],
+            '--output', 'build/host-contracts'], check=True)
+    - if: always()
+      name: Retain diagnostic inventories and logs without Actions artifact storage
+      shell: python
+      env:
+        GH_TOKEN: ${{ github.token }}
+        BUNDLE_NAME: host-contracts-${{ github.run_attempt }}
+      run: |
+        import os, subprocess, sys
+        sys.path.insert(0, 'tools')
+        import host_contracts
+        os.environ['BUNDLE_PATHS'] = host_contracts.retained_paths('build/host-contracts')
+        subprocess.run([sys.executable, '-B', '.github/scripts/lifecycle.py', 'bundle-store'], check=True)

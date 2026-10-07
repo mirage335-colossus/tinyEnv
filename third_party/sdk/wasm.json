@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "kind": "retained-upstream",
+  "target": "wasm32-emscripten",
+  "host": "linux-x86_64",
+  "emscripten_version": "6.0.10",
+  "node_version": "24.19.0",
+  "inputs": [
+    {"name": "emsdk", "file": "emsdk-6.0.10.tar.gz", "url": "https://github.com/emscripten-core/emsdk/archive/refs/tags/6.0.10.tar.gz", "sha256": "09cbafdf00e5a7b4275fc27229d69befafc5ca6070543124219977101310dade", "form": "source"},
+    {"name": "compiler", "file": "wasm-binaries-6.0.10-linux-x64.tar.xz", "url": "https://storage.googleapis.com/webassembly/emscripten-releases-builds/linux/666337b525e673e769121856d175f6f52b8ead64/wasm-binaries.tar.xz", "sha256": "a51dd2829bdf725d268974728e032533b106ea01cb482a62288ec12627a7abbe", "form": "upstream-precompiled"},
+    {"name": "node", "file": "node-v24.19.0-linux-x64.tar.xz", "url": "https://storage.googleapis.com/webassembly/emscripten-releases-builds/deps/node-v24.19.0-linux-x64.tar.xz", "sha256": "14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647", "form": "upstream-precompiled"}
+  ],
+  "cache_options": ["-std=c++20", "-fexceptions", "-sENVIRONMENT=web,worker,node", "-sFILESYSTEM=1"],
+  "source_recovery_scope": "Offline replay from exact retained upstream source and precompiled archives; rebuilding LLVM, Binaryen or Node from native source is outside this recipe."
+}

@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "scope": "host-qualification-only",
+  "architecture": "x86_64",
+  "archive": {
+    "name": "mesa3d-26.2.3-release-msvc.7z",
+    "url": "https://github.com/pal1000/mesa-dist-win/releases/download/26.2.3/mesa3d-26.2.3-release-msvc.7z",
+    "size": 71063681,
+    "sha256": "3f3613adb43cfd0f2e665ce2400b130c275f0b3317cb3a05566320a3a67589ed",
+    "release_id": 397644033,
+    "asset_id": 592900967
+  },
+  "files": {
+    "opengl32.dll": {
+      "member": "x64/opengl32.dll",
+      "size": 139264,
+      "sha256": "ca2458187795aaa8f76f04e79ff46d936715e7adcf72321ec2dcd3534a9c30f4",
+      "machine": "AMD64",
+      "imports": ["gdi32.dll", "kernel32.dll", "libgallium_wgl.dll"]
+    },
+    "libgallium_wgl.dll": {
+      "member": "x64/libgallium_wgl.dll",
+      "size": 61868544,
+      "sha256": "c35cc8e9b8bdd579d465a1c1e27d6e999a272cca54d4e0d5785e97c054055236",
+      "machine": "AMD64",
+      "imports": ["advapi32.dll", "gdi32.dll", "kernel32.dll", "ntdll.dll", "ole32.dll", "shell32.dll", "user32.dll", "version.dll"]
+    }
+  },
+  "supplier": {
+    "repository": "https://github.com/pal1000/mesa-dist-win",
+    "revision": "9d027e91d2ba2de7da37bf180f8d544945ae811c",
+    "release": "26.2.3",
+    "release_url": "https://github.com/pal1000/mesa-dist-win/releases/tag/26.2.3",
+    "published_at": "2026-09-27T12:40:16Z",
+    "build_information": {
+      "url": "https://raw.githubusercontent.com/pal1000/mesa-dist-win/9d027e91d2ba2de7da37bf180f8d544945ae811c/buildinfo/msvc.txt",
+      "sha256": "3231c29eb388a809ad5bf68331fe68d04d6b2663618b280e29dedb17c2fd32a1"
+    },
+    "build_scripts_license": {
+      "url": "https://raw.githubusercontent.com/pal1000/mesa-dist-win/9d027e91d2ba2de7da37bf180f8d544945ae811c/LICENSE",
+      "sha256": "9cd0121dc070f0ac65c1fc266bee74bdbbc22cea4210ae72ae0c1f076448d4cc",
+      "identifier": "MIT",
+      "applies_to": "supplier build scripts; not a complete binary notice inventory"
+    },
+    "declared_components": {
+      "Mesa": "26.2.3",
+      "LLVM": "23.1.2",
+      "zlib": "1.3.2",
+      "zstd": "1.5.7",
+      "SPIRV-Tools": "2026.4.1",
+      "DirectX-Headers": "1.619.5"
+    }
+  },
+  "source_references": [
+    "https://github.com/pal1000/mesa-dist-win/tree/9d027e91d2ba2de7da37bf180f8d544945ae811c",
+    "https://archive.mesa3d.org/mesa-26.2.3.tar.xz",
+    "https://github.com/llvm/llvm-project/releases/tag/llvmorg-23.1.2",
+    "https://docs.mesa3d.org/license.html",
+    "https://docs.mesa3d.org/drivers/llvmpipe.html"
+  ],
+  "redistribution": {
+    "approved": false,
+    "reason": "The binary archive has no license texts. Retain exact source inputs, applicable licenses and linked-component notices before redistributing any retained group. The supplier build-script MIT license alone is insufficient.",
+    "application_payload": false,
+    "sdk_payload": false
+  },
+  "qualification": {
+    "driver": "llvmpipe",
+    "required_opengl": "4.4 or 4.3 with GL_ARB_buffer_storage",
+    "required_wgl": ["WGL_ARB_create_context", "WGL_ARB_pixel_format"],
+    "native_execution": "required per consumer; input inspection is not Windows execution evidence"
+  }
+}

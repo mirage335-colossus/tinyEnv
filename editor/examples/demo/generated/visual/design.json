@@ -1,0 +1,447 @@
+{
+  "bindings": [
+    {
+      "anchor": "on_refresh",
+      "event": "activate",
+      "file": "handlers.cpp",
+      "header": "handlers.hpp",
+      "id": "demo.on_refresh",
+      "symbol": "foundation::editor::demo::on_refresh"
+    },
+    {
+      "anchor": "on_start",
+      "event": "activate",
+      "file": "handlers.cpp",
+      "header": "handlers.hpp",
+      "id": "demo.on_start",
+      "symbol": "foundation::editor::demo::on_start"
+    },
+    {
+      "anchor": "on_stop",
+      "event": "activate",
+      "file": "handlers.cpp",
+      "header": "handlers.hpp",
+      "id": "demo.on_stop",
+      "symbol": "foundation::editor::demo::on_stop"
+    }
+  ],
+  "blocks": [
+    {
+      "binding": "",
+      "breaks_cycle": false,
+      "factory": "foundation::editor::demo::source_a",
+      "file": "blocks.cpp",
+      "flow": "demo.processing",
+      "header": "blocks.hpp",
+      "id": "demo.source_a",
+      "inputs": [],
+      "label": "Source a",
+      "outputs": [
+        {
+          "id": "samples",
+          "required": true,
+          "type": "float"
+        }
+      ],
+      "params": {},
+      "symbol": "foundation::editor::demo::source_a",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "binding": "",
+      "breaks_cycle": false,
+      "factory": "foundation::editor::demo::source_b",
+      "file": "blocks.cpp",
+      "flow": "demo.processing",
+      "header": "blocks.hpp",
+      "id": "demo.source_b",
+      "inputs": [],
+      "label": "Source b",
+      "outputs": [
+        {
+          "id": "samples",
+          "required": true,
+          "type": "float"
+        }
+      ],
+      "params": {},
+      "symbol": "foundation::editor::demo::source_b",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "binding": "",
+      "breaks_cycle": false,
+      "factory": "foundation::editor::demo::mixer",
+      "file": "blocks.cpp",
+      "flow": "demo.processing",
+      "header": "blocks.hpp",
+      "id": "demo.mixer",
+      "inputs": [
+        {
+          "id": "a",
+          "required": true,
+          "type": "float"
+        },
+        {
+          "id": "b",
+          "required": true,
+          "type": "float"
+        }
+      ],
+      "label": "2 in / 4 out",
+      "outputs": [
+        {
+          "id": "sum",
+          "required": true,
+          "type": "float"
+        },
+        {
+          "id": "difference",
+          "required": true,
+          "type": "float"
+        },
+        {
+          "id": "trace",
+          "required": true,
+          "type": "float"
+        },
+        {
+          "id": "metric",
+          "required": true,
+          "type": "std::uint64_t"
+        }
+      ],
+      "params": {},
+      "symbol": "foundation::editor::demo::mixer",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "binding": "",
+      "breaks_cycle": false,
+      "factory": "foundation::editor::demo::sum_sink",
+      "file": "blocks.cpp",
+      "flow": "demo.processing",
+      "header": "blocks.hpp",
+      "id": "demo.sum_sink",
+      "inputs": [
+        {
+          "id": "sum",
+          "required": true,
+          "type": "float"
+        }
+      ],
+      "label": "Sum collector",
+      "outputs": [],
+      "params": {},
+      "symbol": "foundation::editor::demo::sum_sink",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "binding": "",
+      "breaks_cycle": false,
+      "factory": "foundation::editor::demo::difference_sink",
+      "file": "blocks.cpp",
+      "flow": "demo.processing",
+      "header": "blocks.hpp",
+      "id": "demo.difference_sink",
+      "inputs": [
+        {
+          "id": "difference",
+          "required": true,
+          "type": "float"
+        }
+      ],
+      "label": "Difference collector",
+      "outputs": [],
+      "params": {},
+      "symbol": "foundation::editor::demo::difference_sink",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "binding": "",
+      "breaks_cycle": false,
+      "factory": "foundation::editor::demo::trace_sink",
+      "file": "blocks.cpp",
+      "flow": "demo.processing",
+      "header": "blocks.hpp",
+      "id": "demo.trace_sink",
+      "inputs": [
+        {
+          "id": "trace",
+          "required": true,
+          "type": "float"
+        }
+      ],
+      "label": "Trace collector",
+      "outputs": [],
+      "params": {},
+      "symbol": "foundation::editor::demo::trace_sink",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "binding": "",
+      "breaks_cycle": false,
+      "factory": "foundation::editor::demo::metric_sink",
+      "file": "blocks.cpp",
+      "flow": "demo.processing",
+      "header": "blocks.hpp",
+      "id": "demo.metric_sink",
+      "inputs": [
+        {
+          "id": "metric",
+          "required": true,
+          "type": "std::uint64_t"
+        }
+      ],
+      "label": "Metric collector",
+      "outputs": [],
+      "params": {},
+      "symbol": "foundation::editor::demo::metric_sink",
+      "x": 0,
+      "y": 0
+    }
+  ],
+  "cpp_namespace": "foundation::generated",
+  "edges": [
+    {
+      "capacity": 2,
+      "from_block": "demo.source_a",
+      "from_port": "samples",
+      "id": "demo.a",
+      "initial_tokens": 0,
+      "to_block": "demo.mixer",
+      "to_port": "a"
+    },
+    {
+      "capacity": 2,
+      "from_block": "demo.source_b",
+      "from_port": "samples",
+      "id": "demo.b",
+      "initial_tokens": 0,
+      "to_block": "demo.mixer",
+      "to_port": "b"
+    },
+    {
+      "capacity": 2,
+      "from_block": "demo.mixer",
+      "from_port": "sum",
+      "id": "demo.sum",
+      "initial_tokens": 0,
+      "to_block": "demo.sum_sink",
+      "to_port": "sum"
+    },
+    {
+      "capacity": 2,
+      "from_block": "demo.mixer",
+      "from_port": "difference",
+      "id": "demo.difference",
+      "initial_tokens": 0,
+      "to_block": "demo.difference_sink",
+      "to_port": "difference"
+    },
+    {
+      "capacity": 2,
+      "from_block": "demo.mixer",
+      "from_port": "trace",
+      "id": "demo.trace",
+      "initial_tokens": 0,
+      "to_block": "demo.trace_sink",
+      "to_port": "trace"
+    },
+    {
+      "capacity": 2,
+      "from_block": "demo.mixer",
+      "from_port": "metric",
+      "id": "demo.metric",
+      "initial_tokens": 0,
+      "to_block": "demo.metric_sink",
+      "to_port": "metric"
+    }
+  ],
+  "flows": [
+    {
+      "id": "demo.processing",
+      "label": "Unequal-rate MIMO processing"
+    }
+  ],
+  "forms": [
+    {
+      "controls": [
+        {
+          "binding": "",
+          "checked": false,
+          "enabled": true,
+          "event_bindings": {},
+          "id": "demo.heading",
+          "kind": "label",
+          "label": "",
+          "layout": {
+            "height": 32,
+            "width": 620,
+            "x": 12,
+            "y": 12
+          },
+          "multiline": false,
+          "options": [],
+          "parent": "",
+          "read_only": false,
+          "text": "Ordinary C++ events and unequal-rate MIMO streams",
+          "text_limit": 1048576,
+          "visible": true
+        },
+        {
+          "binding": "",
+          "checked": false,
+          "enabled": true,
+          "event_bindings": {},
+          "id": "demo.device",
+          "kind": "choice",
+          "label": "Input",
+          "layout": {
+            "height": 32,
+            "width": 620,
+            "x": 12,
+            "y": 52
+          },
+          "multiline": false,
+          "options": [
+            {
+              "enabled": true,
+              "id": "simulated",
+              "label": "Simulated receiver",
+              "value": "simulated"
+            }
+          ],
+          "parent": "",
+          "read_only": false,
+          "text": "",
+          "text_limit": 1048576,
+          "visible": true
+        },
+        {
+          "binding": "demo.on_refresh",
+          "checked": false,
+          "enabled": true,
+          "event_bindings": {},
+          "id": "demo.refresh",
+          "kind": "button",
+          "label": "Refresh inputs",
+          "layout": {
+            "height": 32,
+            "width": 140,
+            "x": 12,
+            "y": 94
+          },
+          "multiline": false,
+          "options": [],
+          "parent": "",
+          "read_only": false,
+          "text": "",
+          "text_limit": 1048576,
+          "visible": true
+        },
+        {
+          "binding": "demo.on_start",
+          "checked": false,
+          "enabled": true,
+          "event_bindings": {},
+          "id": "demo.start",
+          "kind": "button",
+          "label": "Start",
+          "layout": {
+            "height": 32,
+            "width": 100,
+            "x": 162,
+            "y": 94
+          },
+          "multiline": false,
+          "options": [],
+          "parent": "",
+          "read_only": false,
+          "text": "",
+          "text_limit": 1048576,
+          "visible": true
+        },
+        {
+          "binding": "demo.on_stop",
+          "checked": false,
+          "enabled": false,
+          "event_bindings": {},
+          "id": "demo.stop",
+          "kind": "button",
+          "label": "Stop",
+          "layout": {
+            "height": 32,
+            "width": 100,
+            "x": 272,
+            "y": 94
+          },
+          "multiline": false,
+          "options": [],
+          "parent": "",
+          "read_only": false,
+          "text": "",
+          "text_limit": 1048576,
+          "visible": true
+        },
+        {
+          "binding": "",
+          "checked": false,
+          "enabled": true,
+          "event_bindings": {},
+          "id": "demo.status",
+          "kind": "text",
+          "label": "Status",
+          "layout": {
+            "height": 120,
+            "width": 620,
+            "x": 12,
+            "y": 140
+          },
+          "multiline": true,
+          "options": [],
+          "parent": "",
+          "read_only": true,
+          "text": "Ready. Sources and functions are ordinary editable C++ files.",
+          "text_limit": 1048576,
+          "visible": true
+        }
+      ],
+      "height": 300,
+      "id": "demo.panel",
+      "label": "Receiver panel",
+      "width": 648
+    }
+  ],
+  "generated_directory": "generated/visual",
+  "name": "Minimal adopted project",
+  "recipes": [
+    {
+      "argv": [
+        "cmake",
+        "--build",
+        "../../../build/editor-demo",
+        "--parallel",
+        "2"
+      ],
+      "id": "build",
+      "label": "Build ordinary C++ application",
+      "working_directory": "."
+    },
+    {
+      "argv": [
+        "../../../build/editor-demo/foundation-editor-demo"
+      ],
+      "id": "run",
+      "label": "Run deterministic application",
+      "working_directory": "."
+    }
+  ],
+  "schema_version": 1
+}

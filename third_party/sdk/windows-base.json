@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "kind": "windows-dependencies",
+  "vcpkg_ref": "9e593bb18ea69cc5095e012465dcd675a822ed0d",
+  "triplet": "x64-windows-static",
+  "ports": [],
+  "toolset": "v143",
+  "configurations": ["Debug", "Release"],
+  "crt_linkage": "static",
+  "library_linkage": "static",
+  "lto": false,
+  "note": "The native core has no external libraries. Add reviewed ports explicitly before preparing a dependency base. Microsoft compiler and SDK remain separately installed host tools."
+}

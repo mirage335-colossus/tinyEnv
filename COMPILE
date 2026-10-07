@@ -1,0 +1,53 @@
+Software Foundation — command reference
+
+Build and open a desktop window: COMPILE-gui.
+Build and open the browser GUI: COMPILE-web.
+View or regenerate screenshots: SCREENSHOTS and docs/screenshots.md.
+
+Native prerequisites: Git, CMake >=3.24, Ninja, C++20 compiler, Python >=3.9.
+Rust is the default. Debian-family native dev builds additionally use installed
+distribution rustc/Cargo (Rust >=1.63) with complete package notices. Release,
+ASan, package, portable, Windows, Wasm and prepared-C++-SDK profiles require a
+verified --rust-sdk PATH matching that target. Restore inputs before building.
+Explicit --core-provider cpp selects the complete legacy build without Rust.
+No configuration or normal build downloads or installs software.
+Compile concurrency adapts to available CPU/RAM; --build-jobs overrides it.
+Test concurrency is independently bounded with --test-jobs.
+See docs/development-speed.md for focused checks and delivery scheduling.
+
+./build.sh                                      # incremental Debug build
+./build.sh test dev --label core        # smallest core group
+./build.sh test dev --label tools       # development-tool contracts
+./build.sh test release --rust-sdk /absolute/native-rust-sdk --full
+./build.sh test asan --rust-sdk /absolute/native-rust-sdk --full  # C++/boundary instrumentation
+./build.sh package release --rust-sdk /absolute/native-rust-sdk # archive; not certification
+
+Windows developer prompt: replace ./build.sh with python tools/build.py and
+supply --rust-sdk C:\retained\rust-windows-sdk even for dev.
+GUI checkout: ./build.sh test dev --gui --gui-backends terminal,framebuffer,hosted-web --label gui
+GUI FLTK: ./build.sh build release --rust-sdk /absolute/native-rust-sdk --gui --gui-backends fltk
+GUI inputs: python3 -B gui/source_group.py export --source /absolute/pinned/gui-boundary --output /absolute/gui-input-group
+GUI offline: ./build.sh test dev --gui-input-group /absolute/gui-input-group --label gui
+GUI source: ./build.sh test dev --gui-source /absolute/pinned/gui-boundary --label gui
+SDK: ./build.sh build release --sdk /absolute/prepared-sdk --rust-sdk /absolute/matched-rust-sdk
+Wasm: ./build.sh test release --sdk /absolute/wasm-sdk --rust-sdk /absolute/wasm-rust-sdk --gui --gui-backends wasm --label gui
+WebAssembly Release retains assertions and exceptions to match the prepared frozen cache.
+The same SDK can test core/CLI contracts under retained Node without GUI inputs:
+./build.sh test release --sdk /absolute/wasm-sdk --rust-sdk /absolute/wasm-rust-sdk --gui-backends wasm --label core --build-dir build/wasm-core
+Native GUI and Wasm GUI use separate build/dev-rust-gui and build/release-sdk-rust-sdk-gui trees.
+Core-only Wasm uses build/release-sdk-rust-sdk. SDKs and complete recovery groups remain
+outside Git; normal app iterations reuse them without rebuilding dependencies.
+Retain Windows host tools and the Microsoft offline installer layout as well;
+see docs/sdk.md. Rev needs a newer toolchain than stock Bookworm.
+
+Direct CMake (also supports generators other than Ninja):
+cmake --preset dev -DFOUNDATION_RUST_SDK_ROOT=/absolute/native-rust-sdk
+cmake --build build/dev --target foundation-tests --parallel "$(python3 tools/build_capacity.py)"
+ctest --test-dir build/dev --output-on-failure --no-tests=error --parallel 2
+cmake --install build/dev --prefix /absolute/staging-prefix
+
+Visual Studio and Ninja Multi-Config require --config Release for build/install,
+-C Release for CTest and -C Release for CPack. See docs/building.md.
+Do not run tests from a stale build tree or assume CTest compiles prerequisites.
+See docs/testing.md, docs/sdk.md and docs/portability.md for scope and prerequisites.
+Default policy rationale: docs/rust-hybrid-plan.md#why-rust-is-the-default.

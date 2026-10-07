@@ -1,0 +1,157 @@
+SOFTWARE FOUNDATION HISTORY FACTS FOR VIDEO PRODUCTION
+Read-only investigation: 2026-10-06, America/Chicago.
+Source checkout: software-foundation at e33d72a3e2229e9c876f30dd1d52e583756ec1b9.
+No source, build, test, SDK, Git, or release state was changed by this investigation.
+Primary repository: https://github.com/mirage335-colossus/software-foundation
+
+HISTORY BOUNDARY AND TIME-SAVING LANGUAGE
+
+The current repository has 179 reachable commits. Its earliest commit is
+1ad122479ab10cdae8e1c3d6e195b66dea5445cf, "Add generic software development
+reference", authored and committed 2026-09-30 22:23:13 -05:00. Its latest commit
+is e33d72a (2026-10-06). Git dates measure this repository's recorded history,
+not development labor. The two-week groundwork and one/few-hour reuse claims
+are maintainer estimates supplied by the user, not measured findings in this
+repository. No benchmark of developer hours or AI token savings was found.
+
+Current wording: "Software Foundation is intended to turn roughly two weeks of
+repeated project development into a few hours, potentially as little as one hour."
+Frame the figures as intended benefits and possibilities; do not attribute an
+opinion to the team or add an unnecessary speaker attribution. Do not state that every difficult project has no additional pain points,
+or that production-ready project delivery is guaranteed in an hour.
+
+docs/development-speed.md explicitly separates its illustrative warm build
+timings from developer time and AI token savings. Its 2026-10-04 local historical
+C++ core timing had two CTests, no SDK and no GUI; it cannot substantiate the
+productivity estimate or current Rust/full-matrix duration.
+
+BRIEF VIEWER-FACING PAIN-POINT ENUMERATION
+
+1. GUI portability: one application contract across native windows, browser,
+   WebAssembly, framebuffer and terminal hosts, with backend parity checks.
+2. Dependencies and long-term availability: retained, hash-verified toolchains,
+   target libraries, source and license records; ordinary builds use existing
+   local inputs; SDK host and application target compatibility are distinct.
+3. Regression confidence: contract, invalid-input, cleanup, installed-consumer,
+   GUI and browser tests; explicit coverage inventory rejects omissions and
+   stale evidence; narrow development checks remain separate from qualification.
+4. Continuous flow processing: visually compose typed MIMO blocks with bounded
+   queues, independent input/output counts, backpressure, cancellation and
+   owned state; processing functions remain ordinary application code.
+5. Mixed-language integration: C17 behavior can use C++20 GUI/flow adapters;
+   Rust functions cross an explicit C ABI; CMake retains the actual build graph.
+6. Delivery: GitHub Actions builds and qualification, immutable release copies,
+   provenance/recovery records and signed Debian/Arch/Gentoo package channels.
+
+These are a demonstrated collection of reusable development mechanisms.
+They are not proof that every possible product requirement or platform is solved.
+
+HISTORICAL ANCHORS
+
+2026-09-30 | 1ad1224 | Add generic software development reference.
+Initial 73-file/6,350-line commit already included C++ library/CLI, GUI boundary,
+tests, SDK/build recipes, coordination, documentation and candidate CI.
+
+2026-10-01 | bb1e775 | Complete shared GUI, retained SDK and release qualification practices.
+Implemented/extended supplier source-group retention, GUI comparison tests,
+Linux/ARM/Windows SDK recipes, native GUI checks, candidate/certify/promote
+workflows, portability checks, ABI verification and process supervision.
+
+2026-10-01 | cad7886 | Qualify offline SDK closure and portable hosted execution.
+Extended SDK, container-hosted execution and release checks. The associated
+documentation distinguishes retained-input application replay from rebuilding
+the compiler from source.
+
+2026-10-01 | e1b05d9 | Record verified cross-platform SDK and native GUI qualification.
+Qualification-record anchor; use docs/validation.md for actual recorded scope.
+
+2026-10-02 | 3df3296 | Complete portable build, unified GUI and signed distribution reference workflows.
+Introduced portable build/dependency policy, bounded async task behavior,
+signed/native distribution checks, notices and capacity/coverage regressions.
+
+2026-10-03 | 850c4a7 | Complete portable host capabilities and reusable build integration.
+Extended file services, wasm import/install, no-socket browser isolation,
+portable host behavior and build/test integration.
+
+2026-10-04 | a4f6837 | Record completed portability qualification and SDK publication.
+Qualification/publication-record anchor.
+
+2026-10-04 | 1fcc68f | Add optional retained Rust provider and hybrid qualification.
+Added Rust 1.63 recipes, component, C ABI boundary, archive/build integration,
+offline checks, dedicated qualification workflow and Rust regressions.
+
+2026-10-04 | fefdd0c | Make Rust the default application provider across build and delivery paths.
+Fresh application configurations select Rust; explicit C++ remains available.
+Missing Rust inputs fail rather than silently switching providers.
+
+2026-10-05 | 4bff975 | Add optional self-hosted graphical editor.
+Added form/event generation and typed flow runtime, source editing, owned
+Build/Run operations, C++ and Rust demo integration, plus ten editor suites.
+The editor is a separate optional CMake project and local test inventory.
+
+2026-10-05 | d516feb | Add C editor example and improve shared GUI interactions.
+Added C17 events and signal processing through C++20 GUI/flow adapters.
+
+2026-10-05 | bdb0116 | Integrate signed package repositories into application releases.
+Bound package inventories and native install/upgrade checks to release
+assembly, qualification and Latest delivery.
+
+2026-10-05 | 65161ee | Record qualified Rust release and close completed validation.
+Current docs/validation.md records completed cloud-built all-GUI Rust release
+and integrated package qualification dated 2026-10-06.
+
+2026-10-05 | 9b69d2c | Script to fork the example project to create a new project.
+Followed on 2026-10-06 by 88b6c98, 509feb1 and d987ff2 compatibility improvements.
+README documents depth-one independent repository creation with no remote.
+
+Use commit links in the form:
+https://github.com/mirage335-colossus/software-foundation/commit/COMMIT_ID
+
+CURRENT FACTS AND PRECISE LIMITS
+
+README: seven application hosts are FLTK, Rev, SDL, framebuffer, hosted web,
+Wasm web and terminal. The optional editor itself currently has FLTK, Rev and
+SDL/framebuffer hosts; do not imply it runs in all seven application backends.
+
+docs/validation.md, "Rust all-GUI release and integrated packages (2026-10-06)":
+records workflow 37394012851, attempt 1, all 65 jobs passed with no failed,
+cancelled or skipped jobs; source 91dd1392ce182dd6aeef6bf9e18c17cfb9786377;
+all 106 mandatory logical checks across 66 physical executions; Linux x86_64,
+native Linux aarch64, Windows x86_64 and browser Wasm all-gui release, with signed
+integrated packages and eight native upgrades. This is retained documentation
+evidence, not a fresh network audit by this investigator.
+https://github.com/mirage335-colossus/software-foundation/actions/runs/37394012851
+
+docs/portability.md: tested Linux baseline includes Debian 12; Windows results
+include Server 2022, while oldest-client compatibility remains separate. macOS
+and Arduino Rust/other targets are not qualified. Do not say universal portability.
+
+.agent-pending/editor-platform-qualification.md: focused Linux x86_64 authoring,
+ten local editor suites, FLTK/Rev/framebuffer smoke checks and native interaction
+probes passed. C starter behavior compiled as C17, GUI/flow boundaries as C++20.
+The Rust FIR/decimation example was built/run and checked for uneven chunks,
+backpressure, restart and actual recompilation. Broader Windows, ARM64 and
+disconnected interactive-editor qualification remains outstanding. Native SDK
+editor route is Linux-only. Do not transfer application release qualification
+to the optional editor.
+
+visual/flow/README.md: runtime is optional C++20 and independent of the GUI,
+editor and Rust. Graph factories may wrap arbitrary C/C++ libraries or explicit
+Rust C ABI functions. Each port has independent type/capacity/count, no common
+rate or equal arity is required. Explicit split/merge handles fan-in/out; bounded
+worker or cooperative scheduling, EOF/stop/failure and generation-safe commands
+are separate. It is not a hard real-time scheduler.
+
+editor examples: Simple C, Simple C++, Rust DSP, Advanced MIMO. Existing Rust DSP
+demonstrates a stateful FIR filter and decimation. Computer vision is a sensible
+future application of ordinary processing blocks; no implemented computer-vision
+example or measured computer-vision performance was established here.
+
+editor/README.md: there is no C/C++/Rust parser or special source-region ownership
+scheme. Generated JSON/forms/events/flows own composition, while behavior remains
+ordinary files and explicit project build actions. Rust compilation/linking is
+explicit; Rust is not a prerequisite to build the editor.
+
+The Git history does not establish the proposed Visual Basic historical comparison
+or judgments about its controversy. Prefer a narrowly factual contrast about
+direct access to ordinary C/C++/Rust source if a comparison is included.

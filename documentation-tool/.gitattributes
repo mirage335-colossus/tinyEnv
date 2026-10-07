@@ -1,0 +1,3 @@
+# Preserve PDF bytes on every platform and keep generated bundles out of code diffs.
+published/pdf/*.pdf binary
+published/** linguist-generated=true

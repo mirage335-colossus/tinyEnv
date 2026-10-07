@@ -1,0 +1,10 @@
+--- backends/rev/probe.hpp
++++ backends/rev/probe.hpp
+@@ -20,6 +20,7 @@
+     static void select_record(Adapter&, const WidgetKey&, std::string, bool activate = false);
+     static void scroll(Adapter&, const WidgetKey&, Point);
+     static void pointer(Adapter&, Point, int button = 1, bool double_click = false);
++    static void pointer_phase(Adapter&, PointerKind, Point, unsigned clicks = 1);
+     static void wheel(Adapter&, Point position, Point detents);
+     static void key(Adapter&, std::string, bool control = false, bool shift = false, bool alt = false);
+     static void page(Adapter&, std::string);

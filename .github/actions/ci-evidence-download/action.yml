@@ -1,0 +1,55 @@
+name: Download this run's bounded evidence
+description: Download exact same-run native handoffs; workflow needs establish producer ordering and status.
+inputs:
+  pattern:
+    description: Fixed artifact-slot suffix pattern, for example source-* or qualification-inputs.
+    required: false
+    default: '*'
+  allow-release-fallback:
+    description: Explicitly permit absent native bundles to use legacy release transport.
+    required: false
+    default: 'false'
+  path:
+    description: Fresh runner-local artifact directory.
+    required: false
+    default: ${{ runner.temp }}/foundation-ci-artifacts
+outputs:
+  directory:
+    description: Directory containing separate immutable artifact bundles.
+    value: ${{ steps.directory.outputs.path }}
+runs:
+  using: composite
+  steps:
+    - name: Select a fresh local artifact directory
+      id: directory
+      shell: python
+      env:
+        ARTIFACT_DIRECTORY: ${{ inputs.path }}
+        RELEASE_FALLBACK: ${{ inputs.allow-release-fallback }}
+      run: |
+        import os
+        from pathlib import Path
+        fallback = os.environ['RELEASE_FALLBACK']
+        if fallback not in ('true', 'false'):
+            raise SystemExit('release fallback must be true or false')
+        path = Path(os.environ['ARTIFACT_DIRECTORY']).absolute()
+        if path.exists() or path.is_symlink():
+            raise SystemExit('artifact download directory must be new')
+        # An empty current-attempt download is meaningful during a retry.
+        # Historical selection remains independently authenticated by ci_retry.
+        path.mkdir(parents=True)
+        value = str(path)
+        if any(c in value for c in '\r\n'):
+            raise SystemExit('artifact download path must occupy one line')
+        with Path(os.environ['GITHUB_ENV']).open('a', encoding='utf-8') as stream:
+            stream.write('FOUNDATION_CI_ARTIFACTS_DIR=' + value + '\n')
+            stream.write('FOUNDATION_CI_ARTIFACTS_REQUIRED=true\n')
+            stream.write('FOUNDATION_CI_ARTIFACT_RELEASE_FALLBACK=' + fallback + '\n')
+        with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as stream:
+            stream.write('path=' + value + '\n')
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      if: github.server_url == 'https://github.com'
+      with:
+        pattern: foundation-evidence-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.pattern }}
+        path: ${{ inputs.path }}
+        merge-multiple: false

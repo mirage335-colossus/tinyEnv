@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "kind": "buildroot",
+  "architecture": "x86_64",
+  "target": "x86_64-buildroot-linux-gnu",
+  "glibc": "2.36",
+  "source_date_epoch": 1788480000,
+  "buildroot": {
+    "version": "2026.08",
+    "file": "buildroot-2026.08.tar.xz",
+    "url": "https://buildroot.org/downloads/buildroot-2026.08.tar.xz",
+    "sha256": "87aaca4164ea9d5c8085854953018263f7963f07c22e73a2a2185cc98c581c34"
+  },
+  "glibc_source": {
+    "version": "2.36-e97cfe2293ed097eb3d0b4c18274d22855e65130",
+    "commit": "e97cfe2293ed097eb3d0b4c18274d22855e65130",
+    "upstream": "https://sourceware.org/git/glibc.git",
+    "file": "e97cfe2293ed097eb3d0b4c18274d22855e65130.tar.gz",
+    "site": "https://github.com/bminor/glibc/archive",
+    "url": "https://codeload.github.com/bminor/glibc/tar.gz/e97cfe2293ed097eb3d0b4c18274d22855e65130",
+    "sha256": "42458698e0f9956cf0a8529aa39c318b5130d15a20a40c87fa5cc0054ba19939",
+    "licenses": {
+      "COPYING": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+      "COPYING.LIB": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551",
+      "LICENSES": "b33d0bd9f685b46853548814893a6135e74430d12f6d94ab3eba42fc591f83bc"
+    }
+  },
+  "bootstrap_packages": [
+    "build-essential",
+    "bash",
+    "bc",
+    "bzip2",
+    "ca-certificates",
+    "cpio",
+    "file",
+    "gawk",
+    "git",
+    "gzip",
+    "libncurses-dev",
+    "patch",
+    "perl",
+    "python3",
+    "rsync",
+    "tar",
+    "unzip",
+    "wget",
+    "xz-utils"
+  ],
+  "host_baseline": "Debian 12 Bookworm x86_64",
+  "target_baseline": "glibc 2.36 on x86_64",
+  "profile": "all-gui",
+  "required_packages": [
+    "BR2_PACKAGE_XORG7",
+    "BR2_PACKAGE_FLTK",
+    "BR2_PACKAGE_SDL2",
+    "BR2_PACKAGE_SDL2_X11",
+    "BR2_PACKAGE_LIBGLVND",
+    "BR2_PACKAGE_LIBGLVND_DISPATCH_GL",
+    "BR2_PACKAGE_XLIB_LIBX11",
+    "BR2_PACKAGE_XLIB_LIBXEXT",
+    "BR2_PACKAGE_XLIB_LIBXRENDER",
+    "BR2_PACKAGE_XLIB_LIBXFT",
+    "BR2_PACKAGE_XLIB_LIBXRANDR"
+  ],
+  "capabilities": [
+    "core",
+    "terminal",
+    "framebuffer",
+    "hosted-web",
+    "fltk",
+    "sdl",
+    "rev"
+  ],
+  "runtime_host_services": [
+    "X11 server for native display tests",
+    "Installed OpenGL vendor driver compatible with GLVND"
+  ],
+  "retained_application_inputs": "Pinned GUI source group supplies GLEW and FreeType source archives compiled with this target toolchain."
+}

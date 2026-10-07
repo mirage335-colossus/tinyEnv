@@ -1,0 +1,206 @@
+name: Publish initial-view screenshots
+'on':
+  workflow_dispatch:
+    inputs:
+      core_provider:
+        description: Rust application default; cpp explicitly selects legacy compatibility
+        type: choice
+        options: [rust, cpp]
+        default: rust
+      native_recipe:
+        description: Exact prepared Linux x64 GUI SDK recipe already in base
+        type: string
+        required: true
+      wasm_recipe:
+        description: Exact prepared browser SDK recipe already in base
+        type: string
+        required: true
+      source:
+        description: Existing public base or explicitly retained private SDK bundles
+        type: choice
+        options: [base, retained]
+        default: base
+      retained_inputs:
+        description: For retained only; JSON object containing native and wasm version-2 requests
+        type: string
+        default: ''
+      native_rust_recipe:
+        description: Exact existing Rust Linux x64 recipe; empty selects the checked-in recipe
+        type: string
+        default: ''
+      wasm_rust_recipe:
+        description: Exact existing matched Rust browser recipe; empty selects the checked-in recipe
+        type: string
+        default: ''
+      rust_source:
+        description: Existing public Rust base or explicitly retained Rust bundle
+        type: choice
+        options: [base, retained]
+        default: base
+      rust_retained_inputs:
+        description: For Rust retained only; JSON native and wasm exact producer requests
+        type: string
+        default: ''
+      gui_input:
+        description: Exact GUI input JSON selector from base or completed private input maintenance
+        type: string
+        required: true
+      tag:
+        description: New screenshots- prefixed tag; empty selects this run and attempt
+        type: string
+        default: ''
+      linux_pool:
+        description: Standard or explicitly configured faster native runners
+        type: choice
+        options: [standard, faster]
+        default: standard
+      jobs:
+        description: Auto uses available CPU and RAM; explicit compile override
+        type: choice
+        options: [auto, '2', '4', '8']
+        default: auto
+      execute:
+        description: Publish the verified gallery as a non-Latest prerelease
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: foundation-screenshots-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  GH_TOKEN: ${{ github.token }}
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+  LINUX_POOL: ${{ inputs.linux_pool }}
+  FOUNDATION_FASTER_LINUX_RUNNER: ${{ vars.FOUNDATION_FAST_LINUX_RUNNER }}
+  FOUNDATION_FASTER_ARM_RUNNER: ${{ vars.FOUNDATION_FAST_ARM_RUNNER }}
+  FOUNDATION_FASTER_WINDOWS_RUNNER: ${{ vars.FOUNDATION_FAST_WINDOWS_RUNNER }}
+  TAG: ${{ inputs.tag }}
+jobs:
+  plan:
+    name: Validate and freeze the selected native runner
+    runs-on: ubuntu-24.04
+    outputs:
+      runner: ${{ steps.plan.outputs.runner }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - id: plan
+      run: python .github/scripts/lifecycle.py runner-plan
+  capture:
+    needs: plan
+    runs-on: ${{ needs.plan.outputs.runner }}
+    timeout-minutes: 100
+    permissions:
+      contents: write
+      actions: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - name: Install distribution display tools and use the runner's installed browser
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends cmake ninja-build python3-selenium xvfb xauth xterm xdotool x11-utils imagemagick fonts-dejavu-core fonts-liberation libgl1 libopengl0 libgl1-mesa-dri libx11-6 libxext6 libxrender1 libxft2 libxrandr2 libxcursor1 libxinerama1 libxfixes3 libwayland-client0 libxkbcommon0 libegl1 libdbus-1-3 libibus-1.0-5
+    - name: Build from existing SDKs and capture seven fresh actual surfaces
+      shell: python
+      env:
+        NATIVE_RECIPE: ${{ inputs.native_recipe }}
+        WASM_RECIPE: ${{ inputs.wasm_recipe }}
+        JOBS: ${{ inputs.jobs }}
+        SDK_SOURCE: ${{ inputs.source }}
+        RETAINED_INPUTS: ${{ inputs.retained_inputs }}
+        GUI_INPUT: ${{ inputs.gui_input }}
+        CORE_PROVIDER: ${{ inputs.core_provider }}
+        FOUNDATION_NATIVE_PROVIDER_RECIPE: ${{ inputs.native_rust_recipe }}
+        FOUNDATION_WASM_PROVIDER_RECIPE: ${{ inputs.wasm_rust_recipe }}
+        FOUNDATION_PROVIDER_SOURCE: ${{ inputs.rust_source }}
+        FOUNDATION_PROVIDER_RETAINED_INPUTS: ${{ inputs.rust_retained_inputs }}
+      run: |
+        import os, subprocess, sys
+        command=['/usr/bin/python3', '-B', 'tools/screenshots.py', 'hosted', '--repository',
+          os.environ['GITHUB_REPOSITORY'], '--native-recipe', os.environ['NATIVE_RECIPE'],
+          '--wasm-recipe', os.environ['WASM_RECIPE'], '--jobs', os.environ['JOBS'], '--source', os.environ['SDK_SOURCE'],
+          '--gui-input', os.environ['GUI_INPUT'], '--core-provider', os.environ['CORE_PROVIDER'],
+          '--rust-source', os.environ['FOUNDATION_PROVIDER_SOURCE']]
+        if os.environ['RETAINED_INPUTS']: command += ['--retained-inputs', os.environ['RETAINED_INPUTS']]
+        if os.environ['FOUNDATION_NATIVE_PROVIDER_RECIPE']: command += ['--native-rust-recipe', os.environ['FOUNDATION_NATIVE_PROVIDER_RECIPE']]
+        if os.environ['FOUNDATION_WASM_PROVIDER_RECIPE']: command += ['--wasm-rust-recipe', os.environ['FOUNDATION_WASM_PROVIDER_RECIPE']]
+        if os.environ['FOUNDATION_PROVIDER_RETAINED_INPUTS']: command += ['--rust-retained-inputs', os.environ['FOUNDATION_PROVIDER_RETAINED_INPUTS']]
+        subprocess.run(command, check=True)
+    - name: Verify and plan public gallery publication
+      shell: python
+      run: |
+        import os, subprocess, sys
+        tag=os.environ['TAG'] or 'screenshots-'+os.environ['GITHUB_RUN_ID']+'-attempt-'+os.environ['GITHUB_RUN_ATTEMPT']
+        subprocess.run([sys.executable, '-B', 'tools/screenshots.py', 'publish', 'build/gallery',
+          '--repository', os.environ['GITHUB_REPOSITORY'], '--tag', tag,
+          '--source-commit', os.environ['GITHUB_SHA'], '--receipt', 'build/gallery-plan.json'], check=True)
+    - name: Retain the complete gallery in private draft release storage
+      shell: python
+      run: |
+        import os, subprocess, sys
+        subprocess.run([sys.executable, '-B', 'tools/ci_transport.py', 'publish',
+          '--repository', os.environ['GITHUB_REPOSITORY'], '--run-id', os.environ['GITHUB_RUN_ID'],
+          '--attempt', os.environ['GITHUB_RUN_ATTEMPT'], '--source-commit', os.environ['GITHUB_SHA'],
+          '--workflow', 'screenshots.yml', '--name', 'screenshots', '--root', 'build',
+          '--path', 'gallery', '--path', 'gallery-plan.json', '--pointer', 'build/gallery-pointer.json'], check=True)
+    - name: Retain bounded browser and capture diagnostics
+      if: ${{ always() && (hashFiles('build/screenshot-hosted.log', 'build/browser-preflight/*.json', 'build/browser-preflight/*.log') != '') }}
+      run: python .github/scripts/lifecycle.py bundle-store
+      env:
+        BUNDLE_NAME: screenshots-diagnostics
+        BUNDLE_PATHS: |
+          build/screenshot-hosted.log
+          build/screenshots-inputs/gui-origin.json
+          build/browser-preflight/*.json
+          build/browser-preflight/*.png
+          build/browser-preflight/*.log
+          build/screenshots-work/*.log
+          build/screenshots-work/captures/*.log
+          build/screenshots-display/*.log
+          build/screenshots-display/*.json
+  publish:
+    if: inputs.execute
+    needs: capture
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: release-publisher
+    concurrency:
+      group: foundation-release-lifecycle
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      actions: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - name: Fetch the completed producer's exact gallery
+      shell: python
+      run: |
+        import os, subprocess, sys
+        subprocess.run([sys.executable, '-B', 'tools/ci_transport.py', 'fetch',
+          '--repository', os.environ['GITHUB_REPOSITORY'], '--run-id', os.environ['GITHUB_RUN_ID'],
+          '--attempt', os.environ['GITHUB_RUN_ATTEMPT'], '--source-commit', os.environ['GITHUB_SHA'],
+          '--workflow', 'screenshots.yml', '--name', 'screenshots', '--output', 'build/gallery-input'], check=True)
+    - name: Publish verified images without changing Latest
+      shell: python
+      run: |
+        import os, subprocess, sys
+        tag=os.environ['TAG'] or 'screenshots-'+os.environ['GITHUB_RUN_ID']+'-attempt-'+os.environ['GITHUB_RUN_ATTEMPT']
+        subprocess.run([sys.executable, '-B', 'tools/screenshots.py', 'publish', 'build/gallery-input/gallery',
+          '--repository', os.environ['GITHUB_REPOSITORY'], '--tag', tag,
+          '--source-commit', os.environ['GITHUB_SHA'], '--execute', '--receipt', 'build/gallery-publication.json'], check=True)
+    - name: Retain the publication receipt
+      shell: python
+      run: |
+        import os, subprocess, sys
+        subprocess.run([sys.executable, '-B', 'tools/ci_transport.py', 'publish',
+          '--repository', os.environ['GITHUB_REPOSITORY'], '--run-id', os.environ['GITHUB_RUN_ID'],
+          '--attempt', os.environ['GITHUB_RUN_ATTEMPT'], '--source-commit', os.environ['GITHUB_SHA'],
+          '--workflow', 'screenshots.yml', '--name', 'screenshots-publication', '--root', 'build',
+          '--path', 'gallery-publication.json', '--pointer', 'build/gallery-publication-pointer.json'], check=True)

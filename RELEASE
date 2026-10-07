@@ -1,0 +1,41 @@
+Software Foundation — release and recovery order
+
+1. Freeze source, version, target/backend inventory and qualification policy.
+2. Verify supplier terms, pinned inputs and notices. Resolve GUI terms before
+   distributing optional GUI code. Select exact immutable prepared recipes.
+3. Fetch verified compiled C++ and matched Rust SDK/dependency groups from the durable base. Rust
+   is the default; core_provider=cpp is an explicit legacy choice. Missing
+   groups fail with explicit maintenance instructions; never cold-build implicitly.
+4. Build each configuration once. Stage only allowed target runtime dependencies;
+   inspect every binary for architecture, generic CPU floor and runtime ceiling.
+5. Inventory and relocate each actual final archive:
+   python3 tools/artifact.py create ARCHIVE --manifest MANIFEST.json
+   python3 tools/artifact.py verify ARCHIVE --manifest MANIFEST.json
+6. Assemble a complete local release, copying the exact SDK compiled/source/checksum
+   groups into it. External links are not substitutes:
+   python3 tools/release.py assemble --spec SPEC.json --base BASE --output NEW_RELEASE
+   python3 tools/release.py verify NEW_RELEASE
+7. Wrap verified archives in native repository packages without rebuilding them.
+   Verify signed metadata and exact payloads; retain source/packager identities.
+8. Run the frozen certification policy against these exact bytes and retain all
+   source, archive, recovery, backend and platform results with actual attempts.
+   For a prepared workspace on another CI or a local scheduler:
+   python3 tools/qualification_tasks.py plan --root . --profile core
+   python3 tools/qualification_tasks.py list --root .
+   Dispatch each listed physical execution to its required environment using the
+   prepare/run commands in docs/certification.md. Preserve grouped logical reports,
+   run identity and all companion evidence before using certify_release.py.
+9. Test recovery with the original base unavailable:
+   python3 tools/release.py recover NEW_RELEASE --output NEW_RECOVERY
+   python3 tools/release.py verify-recovery NEW_RECOVERY --expected-release-sha256 TRUSTED_RELEASE_SHA256
+   Retain the trusted original release.json digest independently; kit verification
+   checks complete local inputs, not successful reconstruction or certification.
+10. When separately authorized, publish immutable assets, reverify downloads,
+    certify the delivered bytes and only then promote an eligible ordinary release.
+    Experiments and incomplete qualification cannot become a stable release.
+
+Every publication and report is append-only. Preserve earlier failures and releases.
+SDK/source producers, local assembly, Debian repository creation, hosted delivery,
+coverage and certification tools are included. Actual
+execution and remaining environment qualification are documented in docs/validation.md.
+See docs/releases.md, docs/sdk.md, docs/certification.md and docs/distribution.md.

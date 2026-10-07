@@ -1,0 +1,58 @@
+.TH FOUNDATION-CLI 1 "October 2026" "software-foundation 0.1.0" "User Commands"
+.SH NAME
+foundation-cli \- validate and print a bounded collection of text entries
+.SH SYNOPSIS
+.B foundation-cli
+.RB [ \-\-help | \-\-version | \-\-self-check ]
+.br
+.B foundation-cli \-\-
+.I TEXT
+.RI [ TEXT ...]
+.SH DESCRIPTION
+The command validates the complete request before printing any entries.
+Each entry must contain 1 through 256 printable ASCII bytes.
+At most 64 entries are accepted in one request. Duplicate entries are allowed.
+Successful output contains a decimal identifier, a tab, the original text and
+a newline for each entry. Identifiers begin at 1 for each invocation.
+.PP
+Quote each entry according to the invoking shell. The application does not
+interpret text as a shell command. No persistent collection is created.
+.SH OPTIONS
+.TP
+.B \-\-help
+Print command usage. Invoking the command without arguments has the same effect.
+.TP
+.B \-\-version
+Print the application name and version.
+.TP
+.B \-\-self-check
+Check a small library operation without creating user files or requiring a display.
+.TP
+.B \-\-
+End command-option processing. Every remaining argument is one text entry,
+including arguments that begin with a dash. At least one entry is required.
+.SH EXIT STATUS
+.TP
+.B 0
+The complete operation succeeded.
+.TP
+.B 1
+Input validation, capacity, runtime or output writing failed.
+.TP
+.B 2
+The command line has an unsupported option or missing entry.
+.SH EXAMPLES
+.nf
+foundation-cli \-\- "First entry" "Second entry"
+foundation-cli \-\- "\-\-literal-text"
+foundation-cli \-\-self-check
+.fi
+.SH FILES
+The command has no configuration file and writes no persistent state.
+Keep the complete installed package together when moving a portable archive.
+.SH NOTES
+The browser-target developer package runs this CLI using the retained Node
+runtime. Keep the matching JavaScript and WebAssembly files together.
+Native packages use the ordinary executable directly.
+.SH SEE ALSO
+.BR software-foundation (7)

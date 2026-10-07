@@ -1,0 +1,71 @@
+--- include/gui/web.hpp
++++ include/gui/web.hpp
+@@ -1,7 +1,7 @@
+ #pragma once
+-#include "retained_adapter.hpp"
+-#include "presentation.hpp"
+-#include "runtime.hpp"
++#include <gui/retained_adapter.hpp>
++#include <gui/presentation.hpp>
++#include <gui/runtime.hpp>
+ #include <charconv>
+ #include <cstdlib>
+ #include <iomanip>
+@@ -226,10 +226,11 @@
+ // without re-running an action. A new process/session must have a new epoch.
+ class WebSession {
+ public:
++    using Tick=std::function<void()>;
+     using NextService=std::function<std::optional<ServiceRequest>()>;
+     using CompleteService=std::function<bool(ServiceResult)>;
+-    WebSession(WebAdapter& adapter,std::string epoch,NextService next={},CompleteService complete={})
+-        :adapter_(adapter),epoch_(std::move(epoch)),next_(std::move(next)),complete_(std::move(complete)){
++    WebSession(WebAdapter& adapter,std::string epoch,NextService next={},CompleteService complete={},Tick tick={})
++        :adapter_(adapter),epoch_(std::move(epoch)),next_(std::move(next)),complete_(std::move(complete)),tick_(std::move(tick)){
+         if(epoch_.empty()||!valid_utf8(epoch_))throw std::invalid_argument("Invalid session epoch");}
+     std::string initial(){return response();}
+     std::string receive(std::string_view message){
+@@ -244,11 +245,11 @@
+         }catch(const std::exception& error){return response(error.what());}
+     }
+ private:
+-    WebAdapter& adapter_;std::string epoch_;std::uint64_t ack_=0;NextService next_;CompleteService complete_;std::optional<ServiceRequest> service_;
++    WebAdapter& adapter_;std::string epoch_;std::uint64_t ack_=0;NextService next_;CompleteService complete_;Tick tick_;std::optional<ServiceRequest> service_;
+     std::optional<web_detail::Json> last_presentation_;
+     std::string response(std::string error={}){using namespace web_detail;
+         if(adapter_.closed())service_.reset();
+-        if(!service_&&next_&&!adapter_.closed())service_=next_();
++        if(!service_&&next_&&!adapter_.closed()) {service_=next_();if(service_)adapter_.policy().cancel_pointer();}
+         if(service_&&(service_->title.size()>65536||service_->value.size()>65536||service_->byte_limit>65536)){
+             const auto id=service_->id;service_.reset();error="Browser service text/byte limit exceeds 64 KiB";
+             if(complete_)complete_(ServiceResult{id,ServiceStatus::error,{},error});
+@@ -263,13 +264,14 @@
+             {"snapshot",*last_presentation_},{"service",std::move(service)}});
+     }
+     void dispatch(const web_detail::Json& op){using namespace web_detail;const auto& type=op.at("type").str();
+-        if(type=="poll")return;
++        if(type=="poll"){if(!adapter_.closed()&&tick_)tick_();return;}
+         if(adapter_.closed())return;
+         if(type=="measure"){if(adapter_.measured(op.at("values")))adapter_.policy().send(ResizeEvent{adapter_.snapshot().client_size,adapter_.snapshot().display_scale});return;}
+         if(type=="service"){if(!service_||integer(op.at("id"))!=service_->id)throw std::invalid_argument("Stale service reply");
+             const auto status=op.at("status").str();ServiceResult result{service_->id,status=="success"?ServiceStatus::success:status=="cancelled"?ServiceStatus::cancelled:ServiceStatus::error,op.at("value").str(),op.at("error").str()};
+             if(!complete_||!complete_(std::move(result)))throw std::invalid_argument("Service reply rejected");
+             service_.reset();return;}
++        if(service_&&type!="resize"&&type!="close")return; // Modal service owns user input.
+         if(type=="resize"){const Size size{op.at("width").number(),op.at("height").number()};
+             if(size.width>4096||size.height>4096)throw std::length_error("Browser client size exceeds 4096");
+             adapter_.policy().send(ResizeEvent{size,op.at("scale").number()});return;}
+@@ -298,9 +300,10 @@
+         else if(type=="activateRecord")event=ActivateRecord{op.at("id").str()};
+         else if(type=="submit")event=SubmitText{};
+         else if(type=="action")event=InvokeAction{op.at("id").str()};
+-        else if(type=="pointer"){const auto& kind=op.at("kind").str();if(kind!="click"&&kind!="double"&&kind!="move"&&kind!="wheel")throw std::invalid_argument("Unknown pointer kind");
+-            event=PointerInput{kind=="click"?PointerKind::click:kind=="double"?PointerKind::double_click:kind=="move"?PointerKind::move:PointerKind::wheel,
+-                {op.at("x").number(),op.at("y").number()},op.at("wheelX").number(),op.at("wheelY").number(),op.at("control").boolean(),op.at("shift").boolean(),op.at("alt").boolean()};}
++        else if(type=="pointer"){const auto& kind=op.at("kind").str();if(kind!="click"&&kind!="double"&&kind!="move"&&kind!="wheel"&&kind!="press"&&kind!="release"&&kind!="cancel")throw std::invalid_argument("Unknown pointer kind");
++            event=PointerInput{kind=="click"?PointerKind::click:kind=="double"?PointerKind::double_click:kind=="move"?PointerKind::move:kind=="press"?PointerKind::press:kind=="release"?PointerKind::release:kind=="cancel"?PointerKind::cancel:PointerKind::wheel,
++                {op.at("x").number(),op.at("y").number()},op.at("wheelX").number(),op.at("wheelY").number(),op.at("control").boolean(),op.at("shift").boolean(),op.at("alt").boolean(),
++                std::get<Json::Object>(op.value).contains("pointerId")?integer(op.at("pointerId")):0};}
+         else throw std::invalid_argument("Unknown browser operation");
+         adapter_.policy().send(WidgetEvent{target,std::move(event)});
+     }

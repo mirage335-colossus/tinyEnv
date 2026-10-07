@@ -1,0 +1,279 @@
+{
+  "bindings": [
+    {
+      "anchor": "on_run",
+      "event": "activate",
+      "file": "events.cpp",
+      "header": "event_handlers.hpp",
+      "id": "simple.on_run",
+      "symbol": "starter::on_run"
+    },
+    {
+      "anchor": "on_clear",
+      "event": "activate",
+      "file": "events.cpp",
+      "header": "event_handlers.hpp",
+      "id": "simple.on_clear",
+      "symbol": "starter::on_clear"
+    }
+  ],
+  "blocks": [
+    {
+      "binding": "",
+      "breaks_cycle": false,
+      "factory": "starter::make_source",
+      "file": "signal.cpp",
+      "flow": "simple.processing",
+      "header": "flow_adapter.hpp",
+      "id": "simple.source",
+      "inputs": [],
+      "label": "Source",
+      "outputs": [
+        {
+          "id": "out",
+          "required": true,
+          "type": "float"
+        }
+      ],
+      "params": {},
+      "symbol": "starter::source_sample",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "binding": "",
+      "breaks_cycle": false,
+      "factory": "starter::make_gain",
+      "file": "signal.cpp",
+      "flow": "simple.processing",
+      "header": "flow_adapter.hpp",
+      "id": "simple.gain",
+      "inputs": [
+        {
+          "id": "in",
+          "required": true,
+          "type": "float"
+        }
+      ],
+      "label": "Gain",
+      "outputs": [
+        {
+          "id": "out",
+          "required": true,
+          "type": "float"
+        }
+      ],
+      "params": {},
+      "symbol": "starter::apply_gain",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "binding": "",
+      "breaks_cycle": false,
+      "factory": "starter::make_collector",
+      "file": "signal.cpp",
+      "flow": "simple.processing",
+      "header": "flow_adapter.hpp",
+      "id": "simple.collector",
+      "inputs": [
+        {
+          "id": "in",
+          "required": true,
+          "type": "float"
+        }
+      ],
+      "label": "Collector",
+      "outputs": [],
+      "params": {},
+      "symbol": "starter::collect_sample",
+      "x": 0,
+      "y": 0
+    }
+  ],
+  "cpp_namespace": "foundation::generated",
+  "edges": [
+    {
+      "capacity": 2,
+      "from_block": "simple.source",
+      "from_port": "out",
+      "id": "simple.source_to_gain",
+      "initial_tokens": 0,
+      "to_block": "simple.gain",
+      "to_port": "in"
+    },
+    {
+      "capacity": 2,
+      "from_block": "simple.gain",
+      "from_port": "out",
+      "id": "simple.gain_to_collector",
+      "initial_tokens": 0,
+      "to_block": "simple.collector",
+      "to_port": "in"
+    }
+  ],
+  "flows": [
+    {
+      "id": "simple.processing",
+      "label": "Source / Gain / Collector"
+    }
+  ],
+  "forms": [
+    {
+      "controls": [
+        {
+          "binding": "",
+          "checked": false,
+          "enabled": true,
+          "event_bindings": {},
+          "id": "simple.heading",
+          "kind": "label",
+          "label": "",
+          "layout": {
+            "height": 28,
+            "width": 496,
+            "x": 12,
+            "y": 12
+          },
+          "multiline": false,
+          "options": [],
+          "parent": "",
+          "read_only": false,
+          "text": "Four samples through an ordinary C++ gain function",
+          "text_limit": 1048576,
+          "visible": true
+        },
+        {
+          "binding": "",
+          "checked": false,
+          "enabled": true,
+          "event_bindings": {},
+          "id": "simple.gain_choice",
+          "kind": "choice",
+          "label": "Gain",
+          "layout": {
+            "height": 32,
+            "width": 200,
+            "x": 12,
+            "y": 50
+          },
+          "multiline": false,
+          "options": [
+            {
+              "enabled": true,
+              "id": "double",
+              "label": "Gain 2",
+              "value": "2"
+            },
+            {
+              "enabled": true,
+              "id": "half",
+              "label": "Gain 0.5",
+              "value": "0.5"
+            }
+          ],
+          "parent": "",
+          "read_only": false,
+          "text": "",
+          "text_limit": 1048576,
+          "visible": true
+        },
+        {
+          "binding": "simple.on_run",
+          "checked": false,
+          "enabled": true,
+          "event_bindings": {},
+          "id": "simple.run",
+          "kind": "button",
+          "label": "Run samples",
+          "layout": {
+            "height": 32,
+            "width": 140,
+            "x": 224,
+            "y": 50
+          },
+          "multiline": false,
+          "options": [],
+          "parent": "",
+          "read_only": false,
+          "text": "",
+          "text_limit": 1048576,
+          "visible": true
+        },
+        {
+          "binding": "simple.on_clear",
+          "checked": false,
+          "enabled": true,
+          "event_bindings": {},
+          "id": "simple.clear",
+          "kind": "button",
+          "label": "Clear",
+          "layout": {
+            "height": 32,
+            "width": 100,
+            "x": 376,
+            "y": 50
+          },
+          "multiline": false,
+          "options": [],
+          "parent": "",
+          "read_only": false,
+          "text": "",
+          "text_limit": 1048576,
+          "visible": true
+        },
+        {
+          "binding": "",
+          "checked": false,
+          "enabled": true,
+          "event_bindings": {},
+          "id": "simple.output",
+          "kind": "text",
+          "label": "Output",
+          "layout": {
+            "height": 100,
+            "width": 496,
+            "x": 12,
+            "y": 96
+          },
+          "multiline": true,
+          "options": [],
+          "parent": "",
+          "read_only": true,
+          "text": "Choose a gain, then Run samples.",
+          "text_limit": 1048576,
+          "visible": true
+        }
+      ],
+      "height": 220,
+      "id": "simple.controls",
+      "label": "Gain controls",
+      "width": 520
+    }
+  ],
+  "generated_directory": "generated/visual",
+  "name": "Simple C++ starter",
+  "recipes": [
+    {
+      "argv": [
+        "cmake",
+        "--build",
+        "../../../build/editor-simple-example-check",
+        "--parallel",
+        "2"
+      ],
+      "id": "build",
+      "label": "Build simple C++ application",
+      "working_directory": "."
+    },
+    {
+      "argv": [
+        "../../../build/editor-simple-example-check/foundation-editor-simple"
+      ],
+      "id": "run",
+      "label": "Run and check sample results",
+      "working_directory": "."
+    }
+  ],
+  "schema_version": 1
+}

@@ -1,0 +1,93 @@
+--- host.py
++++ host.py
+@@ -6,6 +6,8 @@
+ Sessions expire after 15 idle minutes and shutdown kills every owned child.
+ """
+ import argparse
++import base64
++import hashlib
+ import json
+ import os
+ from pathlib import Path
+@@ -20,6 +22,39 @@
+ MAX_INPUT = 1024 * 1024
+ MAX_OUTPUT = 96 * 1024 * 1024
+ ASSETS = Path(__file__).resolve().parent
++
++
++def renderer_script_hash():
++    """Read generated data without executing renderer code in the host."""
++    path = ASSETS / "renderer_child_bundle.mjs"
++    if path.is_symlink() or not path.is_file() or path.stat().st_size > 16 * 1024 * 1024:
++        raise ValueError("Retained renderer bundle is missing or invalid")
++    lines = path.read_text(encoding="utf-8").splitlines()
++    names = ("CHILD_SCRIPT", "CHILD_SCRIPT_SHA256", "CHILD_CSP", "CHILD_SANDBOX",
++             "CHILD_PROTOCOL", "CHILD_STYLE", "CHILD_INPUTS")
++    if len(lines) != len(names) + 1 or lines[0] != "// Generated renderer data; never evaluate this script in the parent.":
++        raise ValueError("Invalid generated renderer data")
++    values = {}
++    for name, line in zip(names, lines[1:]):
++        prefix = "export const " + name + "="
++        if not line.startswith(prefix) or not line.endswith(";"):
++            raise ValueError("Invalid generated renderer export")
++        values[name] = json.loads(line[len(prefix):-1])
++    canonical = (lines[0] + "\n" + "".join("export const " + name + "=" +
++                 json.dumps(values[name], ensure_ascii=True, separators=(",", ":")) + ";\n" for name in names))
++    if canonical != path.read_text(encoding="utf-8") or any(not isinstance(values[name], str) for name in names[:-1]):
++        raise ValueError("Invalid renderer data or script")
++    actual = base64.b64encode(hashlib.sha256(values["CHILD_SCRIPT"].encode("utf-8")).digest()).decode("ascii")
++    if (values["CHILD_SCRIPT_SHA256"] != actual or values["CHILD_SANDBOX"] != "allow-scripts" or
++            values["CHILD_PROTOCOL"] != "foundation-renderer-v1"):
++        raise ValueError("Renderer bundle policy differs")
++    expected_policy = ("default-src 'none'; script-src 'sha256-" + actual + "'; "
++                       "connect-src 'none'; worker-src 'none'; style-src 'unsafe-inline'; "
++                       "img-src data:; object-src 'none'; base-uri 'none'; form-action 'none'; "
++                       "frame-src 'none'; child-src 'none'")
++    if values["CHILD_CSP"] != expected_policy:
++        raise ValueError("Renderer content policy differs")
++    return actual
+ 
+ 
+ class Session:
+@@ -83,6 +118,7 @@
+     def __init__(self, address, executable, wasm_dir=None):
+         self.executable = Path(executable).resolve() if executable else None
+         self.wasm_dir = Path(wasm_dir).resolve() if wasm_dir else None
++        self.renderer_script_hash = renderer_script_hash()
+         self.sessions = {}
+         self.sessions_lock = threading.Lock()
+         super().__init__(address, Handler)
+@@ -119,7 +155,9 @@
+         self.send_header("Cache-Control", "no-store")
+         self.send_header("X-Content-Type-Options", "nosniff")
+         self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+-        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'")
++        # srcdoc inherits this policy as well as its stricter own policy. Permit
++        # only the generated child's exact inline bytes, never arbitrary inline JS.
++        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-" + self.server.renderer_script_hash + "'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'")
+         self.end_headers()
+         self.wfile.write(data)
+ 
+@@ -137,7 +175,21 @@
+                  "/index.html": ("index.html", "text/html; charset=utf-8"),
+                  "/renderer.mjs": ("renderer.mjs", "text/javascript; charset=utf-8"),
+                  "/style.css": ("style.css", "text/css; charset=utf-8"),
+-                 "/boot.mjs": ("boot.mjs", "text/javascript; charset=utf-8")}
++                 "/boot.mjs": ("boot.mjs", "text/javascript; charset=utf-8"),
++                 "/browser_presenter.mjs": ("browser_presenter.mjs", "text/javascript; charset=utf-8"),
++                 "/file_services.mjs": ("file_services.mjs", "text/javascript; charset=utf-8"),
++                 "/browser_lifecycle.mjs": ("browser_lifecycle.mjs", "text/javascript; charset=utf-8"),
++                 "/wasm_worker.mjs": ("wasm_worker.mjs", "text/javascript; charset=utf-8"),
++                 "/wasm_transport.mjs": ("wasm_transport.mjs", "text/javascript; charset=utf-8"),
++                 "/browser_client.mjs": ("browser_client.mjs", "text/javascript; charset=utf-8"),
++                 "/browser_services.mjs": ("browser_services.mjs", "text/javascript; charset=utf-8"),
++                 "/browser_limits.mjs": ("browser_limits.mjs", "text/javascript; charset=utf-8"),
++                 "/browser_composition.mjs": ("browser_composition.mjs", "text/javascript; charset=utf-8"),
++                 "/renderer_channel.mjs": ("renderer_channel.mjs", "text/javascript; charset=utf-8"),
++                 "/renderer_frame.mjs": ("renderer_frame.mjs", "text/javascript; charset=utf-8"),
++                 "/browser_embedding.mjs": ("browser_embedding.mjs", "text/javascript; charset=utf-8"),
++                 "/renderer_dom.mjs": ("renderer_dom.mjs", "text/javascript; charset=utf-8"),
++                 "/renderer_child_bundle.mjs": ("renderer_child_bundle.mjs", "text/javascript; charset=utf-8")}
+         if path in known:
+             name, kind = known[path]
+             return self.reply(200, (ASSETS / name).read_bytes(), kind)

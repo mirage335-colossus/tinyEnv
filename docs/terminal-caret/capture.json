@@ -1,0 +1,32 @@
+{
+  "scope": "Terminal-only local verification of the caret fix; not a seven-host release gallery",
+  "source_base_commit": "9335ddf21a8a31e6b8f61a124a13cf31c0acf5b0",
+  "source_state": "Working tree with reviewed terminal-caret integration patch and focused regression tests",
+  "caret_patch_sha256": "69ed0a5c60187449f8b45ea0dad2f489a74177092743b9c24e4deef36d8f30c7",
+  "gui_group_manifest_sha256": "7fca961e0e472f353e1f7332baca565f479ddc71ff82a33d6b1dbfb89009add8",
+  "executable_sha256": "497854a9cc2999d19b76f5308fae65418b182e3cbd33ca309054c7c618ff07ae",
+  "image_sha256": "7091a52a39258221d4ea617f968d3bdd6ec96f2ee7df6170142688842e61dea0",
+  "dimensions": [
+    644,
+    531
+  ],
+  "terminal_cells": [
+    80,
+    31
+  ],
+  "font": "DejaVu Sans Mono 10pt",
+  "display_dpi": 96,
+  "content_edits": false,
+  "resampled": false,
+  "xterm_version": "XTerm(398)",
+  "reproduction": "Run the existing screenshots.yml workflow on source including the recorded caret patch; terminal capture uses the same xterm settings.",
+  "capture_date": "2026-10-04",
+  "build_info": "source_tree_sha256=e7309584914afc88590e211af131f3441c1766fdff74179597a5a82f8a2db09d\ntarget=linux-x86_64\ngui_backends=terminal,framebuffer\ndependency_recipes=\nsdk_recipe_id=native-unprepared\nsdk_manifest_sha256=none\nportable=OFF\nVersion: 0.1.0\nCompiler: GNU 14.2.0\nTarget: Linux x86_64\nBuild type: Debug\nGUI enabled: ON\nSanitizers: OFF\nCompatibility: native build; no older OS qualification implied\n",
+  "checks_passed": [
+    "foundation.gui.terminal-caret",
+    "foundation.gui.upstream.terminal",
+    "foundation.gui.terminal-host",
+    "foundation.gui.installed-terminal"
+  ],
+  "display_cleanup": "joined"
+}

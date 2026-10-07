@@ -1,0 +1,23 @@
+--- rev_test.cpp
++++ rev_test.cpp
+@@ -130,8 +130,9 @@
+     };
+     const auto background=physical({630,420});
+     check(pixel(capture,unsigned(background.x),unsigned(background.y))==fixture.view.palette.background,"Native root background ignored the shared palette");
+-    check(pixel(capture,135,125)==gui::Color{17,99,203},"Rev did not upload/draw the declared bitmap texture");
+-    check(pixel(capture,175,125)!=gui::Color{17,99,203},"Rev bitmap escaped its group content clip");
++    const auto bitmap_inside=physical({135,125}),bitmap_outside=physical({175,125});
++    check(pixel(capture,unsigned(bitmap_inside.x),unsigned(bitmap_inside.y))==gui::Color{17,99,203},"Rev did not upload/draw the declared bitmap texture");
++    check(pixel(capture,unsigned(bitmap_outside.x),unsigned(bitmap_outside.y))!=gui::Color{17,99,203},"Rev bitmap escaped its group content clip");
+     fixture.widget("label-21").state.font.bold=true;fixture.publish();settle(adapter);
+     const auto bold=adapter.capture();const auto first=physical({24,60}),last=physical({152,88});
+     std::size_t changed_glyph_pixels=0;
+@@ -141,7 +142,7 @@
+     check(changed_glyph_pixels>10,"Native label ignored the shared bold font declaration");
+     fixture.widget("pixels-38").state.bitmap={"source-90",2,gui::solid_bitmap(111,57,23)};
+     fixture.publish();settle(adapter);
+-    check(pixel(adapter.capture(),135,125)==gui::Color{111,57,23},"Changed source revision did not replace the native texture");
++    check(pixel(adapter.capture(),unsigned(bitmap_inside.x),unsigned(bitmap_inside.y))==gui::Color{111,57,23},"Changed source revision did not replace the native texture");
+     const auto before=fixture.inputs();
+     Probe::pointer(adapter,{135,125});settle(adapter);
+     check(fixture.inputs()==before+1&&fixture.last_input().target.id=="pixels-38","Native pointer missed the bitmap target");

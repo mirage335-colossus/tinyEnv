@@ -1,0 +1,54 @@
+--- backends/terminal/main.cpp
++++ terminal_runner.hpp
+@@ -1,5 +1,5 @@
+ #include "gui/terminal.hpp"
+-#include "../../examples/application.hpp"
++#include "host/native_session.hpp"
+ #include <chrono>
+ #include <iostream>
+ #include <stdexcept>
+@@ -215,7 +215,8 @@
+ #endif
+ }
+ 
+-int main(int argc,char** argv) {
++namespace foundation::host {
++template<Application App> int run_terminal(int argc,char** argv) {
+     if(argc==2&&std::string_view(argv[1])=="--help") {
+         std::cout<<"Standalone terminal UI example\n"
+                  <<"Tab/Shift-Tab: focus; Enter/Space: activate; arrows: edit/select;\n"
+@@ -227,29 +228,19 @@
+     if(argc!=1) {std::cerr<<"Usage: "<<argv[0]<<" [--help]\n";return 2;}
+     try {
+         TerminalHost host;
+-        Example* application=nullptr;
+-        std::function<void()> service_pump;
+-        gui::TerminalAdapter adapter([&](const gui::Event& event) {
+-            if(application)application->handle(event);
+-            // A single native read may contain submission plus more typing.
+-            // Establish modality before the next decoded input is dispatched.
+-            if(service_pump)service_pump();
+-        });
+-        Example example(adapter);application=&example;
+-        service_pump=[&] {
+-            if(!adapter.closed()&&!adapter.prompt())if(auto request=example.next_service())
+-                adapter.service(std::move(*request),[&](gui::ServiceResult result) {example.complete_service(std::move(result));});
+-        };
++        NativeSession<App, gui::TerminalAdapter> session;
++        auto& adapter=session.adapter;
+         adapter.focus_next();
+         std::pair<unsigned,unsigned> dimensions{};
+         while(!adapter.closed()) {
+             if(host.stopped()) {adapter.key(gui::Key::quit);break;}
+             const auto current=host.size();
+             if(current!=dimensions) {adapter.terminal_size(current.first,current.second);dimensions=current;}
+-            example.retry_presentation();
+-            service_pump();
++            session.tick();
+             host.draw(adapter.ansi_rows());
+             host.poll(adapter);
+         }
+     } catch(const std::exception& error) {std::cerr<<"Terminal example: "<<error.what()<<'\n';return 1;}
++    return 0;
+ }
++}

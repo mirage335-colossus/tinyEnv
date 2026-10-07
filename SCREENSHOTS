@@ -1,0 +1,27 @@
+Software Foundation — screenshot reference
+
+View all seven hosts, including the checked-in offline snapshot: docs/screenshots.md
+Original PNGs and provenance: docs/screenshots/
+Verify the offline snapshot:
+python3 -B tools/screenshots.py verify docs/screenshots
+
+Regenerate with the existing hosted capture workflow on a selected source revision:
+gh workflow run screenshots.yml --repo mirage335-colossus/software-foundation \
+  --ref '<source branch or tag>' \
+  -f native_recipe='<exact prepared Linux x64 GUI SDK recipe digest>' \
+  -f wasm_recipe='<exact prepared browser SDK recipe digest>' \
+  -f gui_input='{"source":"base","manifest_sha256":"<exact GUI group manifest digest>"}' \
+  -f source=base -f jobs=auto -f linux_pool=standard -f execute=false
+
+Replace placeholders with reviewed existing inputs; missing groups fail.
+core_provider defaults rust. The exact checked-in native/Wasm Rust recipes are
+derived unless native_rust_recipe/wasm_rust_recipe are supplied. Their complete
+retained groups must exist in rust_source=base (default). For rust_source=retained,
+supply rust_retained_inputs with exact native and wasm Rust producer requests.
+Explicit core_provider=cpp selects the historical Rust-free capture route.
+Optional tag must be a new screenshots- tag; empty uses the run and attempt.
+For source=retained, also supply retained_inputs with exact native and wasm
+version-2 requests, and the corresponding exact gui_input selector.
+execute=false builds/captures and writes private draft release retention.
+execute=true additionally publishes a non-Latest prerelease through release-publisher.
+See docs/screenshots.md for prerequisites, exact-release download and refresh steps.

@@ -1,0 +1,30 @@
+--- rev_clipboard_test.cpp
++++ rev_clipboard_test.cpp
+@@ -87,7 +87,10 @@
+     const auto selection = XInternAtom(display, "CLIPBOARD", False);
+     const auto utf8 = XInternAtom(display, "UTF8_STRING", False);
+     XSetSelectionOwner(display, selection, window, CurrentTime);
+-    XFlush(display);
++    // The reader uses another connection: wait for ownership before conversion.
++    const auto observed_owner = XGetSelectionOwner(display, selection);
++    assert(observed_owner == window);
++    unsigned malformed_replies = 0;
+     std::optional<ClipboardResult> invalid;
+     reader.paste([&](auto result) { invalid = std::move(result); });
+     wait_for([&] { return invalid.has_value(); }, [&] {
+@@ -96,6 +99,7 @@
+             XEvent event;
+             XNextEvent(display, &event);
+             if (event.type != SelectionRequest) continue;
++            ++malformed_replies;
+             const auto& request = event.xselectionrequest;
+             const auto property = request.property == None ? request.target : request.property;
+             const unsigned char value[]{'a', 0, 'b'};
+@@ -114,6 +118,7 @@
+         }
+         pump();
+     });
++    assert(malformed_replies == 1);
+     assert(!invalid->text && !invalid->error.empty());
+     XDestroyWindow(display, window);
+     XCloseDisplay(display);

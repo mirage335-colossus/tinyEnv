@@ -1,0 +1,114 @@
+name: Development feedback
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: feedback-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  focused:
+    name: Focused checks (not release qualification)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Select conservative feedback scope from local Git
+        id: changes
+        run: python3 -B tools/ci_changes.py
+      - name: Require an explicit selection
+        env:
+          SELECTED: ${{ steps.changes.outputs.build }}
+        run: test "$SELECTED" = true || test "$SELECTED" = false
+      - name: Validate narrative documents
+        if: steps.changes.outputs.build == 'false'
+        run: python3 -B tools/check_docs.py
+      - name: Prepare distribution Rust host tools
+        if: steps.changes.outputs.build == 'true'
+        run: sudo sh tools/ci-apt.sh install rustc cargo
+      - name: Build and test inexpensive contracts
+        if: steps.changes.outputs.build == 'true'
+        run: PATH=/usr/bin:/bin:$PATH python3 tools/build.py test dev --core-provider rust --label fast --test-jobs 2
+      - name: Explicit C++ compatibility contracts
+        if: steps.changes.outputs.build == 'true'
+        run: python3 tools/build.py test dev --core-provider cpp --build-dir build/cpp-compat --label core --test-jobs 2
+      - name: Scope
+        if: always()
+        run: echo 'Focused feedback only. Full tools, platform, package and GUI qualification are separate.' >> "$GITHUB_STEP_SUMMARY"
+
+  workflow-syntax:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Select conservative feedback scope from local Git
+        id: changes
+        run: python3 -B tools/ci_changes.py
+      - name: Require an explicit selection
+        env:
+          SELECTED: ${{ steps.changes.outputs.workflow_lint }}
+        run: test "$SELECTED" = true || test "$SELECTED" = false
+      - name: Validate workflows with installed or exact retained validator
+        if: steps.changes.outputs.workflow_lint == 'true'
+        run: python3 tools/ci_plan.py workflow-lint --retained-url "$RETAINED_URL" --executable "$VALIDATOR" --output build/workflow-lint
+        env:
+          RETAINED_URL: ${{ vars.FOUNDATION_ACTIONLINT_URL }}
+          VALIDATOR: ${{ vars.FOUNDATION_ACTIONLINT_EXECUTABLE }}
+
+  shared-gui:
+    name: Shared GUI contracts and generic hosts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Select conservative feedback scope from local Git
+        id: changes
+        run: python3 -B tools/ci_changes.py
+      - name: Require an explicit selection
+        env:
+          SELECTED: ${{ steps.changes.outputs.gui }}
+        run: test "$SELECTED" = true || test "$SELECTED" = false
+      - name: Prepare distribution Rust host tools
+        if: steps.changes.outputs.gui == 'true'
+        run: sudo sh tools/ci-apt.sh install rustc cargo
+      - name: Compile shared application once and check generic hosts
+        if: steps.changes.outputs.gui == 'true'
+        run: PATH=/usr/bin:/bin:$PATH python3 -B tools/build.py test dev --core-provider rust --gui --gui-backends terminal,framebuffer,hosted-web --host-tests --label gui --test-jobs 2
+
+  changed-tools:
+    name: Affected complete infrastructure suites
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Select conservative feedback scope from local Git
+        id: changes
+        run: python3 -B tools/ci_changes.py
+      - name: Require an explicit selection
+        env:
+          SELECTED: ${{ steps.changes.outputs.tools }}
+        run: test "$SELECTED" = true || test "$SELECTED" = false
+      - name: Run affected whole tooling suites with strict case outcomes
+        if: steps.changes.outputs.tools == 'true'
+        run: python3 -B tools/ci_changes.py --run-tool-suites --tool-jobs auto --tool-output build/changed-tools
+      - name: Preserve complete tooling outcome receipts
+        if: always() && steps.changes.outputs.tools == 'true'
+        uses: ./.github/actions/ci-evidence-publish
+        with:
+          name: evidence-batch-feedback-${{ github.run_attempt }}
+          slot: 0
+          paths: build/changed-tools/*.json
