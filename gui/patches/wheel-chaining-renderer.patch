@@ -1,0 +1,44 @@
+--- a/backends/web/renderer.mjs
++++ b/backends/web/renderer.mjs
+@@ -467,10 +467,39 @@
+   groupWheel(event) {
+     if(event.defaultPrevented||!this.snapshot)return;
+     const node=event.target.closest?.(".widget"), entry=node?this.nodes.get(node.dataset.key):null;
+-    if(entry&&(entry.widget.kind===6||entry.widget.kind===5))return;
++    if(!Number.isFinite(event.deltaX)||!Number.isFinite(event.deltaY)||(!event.deltaX&&!event.deltaY))return;
++    if(event.target.closest?.("select"))return;
++    if(entry&&(entry.widget.kind===6||entry.widget.kind===5)){
++      // Suggestions retain their native wheel selection. A text/list viewport
++      // owns a wheel only while it can move in a requested direction.
++      if(event.ctrlKey)return;
++      const control=entry.control;
++      if(event.target===control||control.contains?.(event.target)){
++        if(!(control.clientWidth>0&&control.clientHeight>0))return;
++        const room=(offset,extent,viewport,delta)=>{
++          const maximum=Math.max(0,extent-viewport),current=Math.max(0,Math.min(maximum,offset));
++          return delta>0?current<maximum:delta<0?current>0:false;
++        };
++        if(room(control.scrollLeft,control.scrollWidth,control.clientWidth,event.deltaX)||
++           room(control.scrollTop,control.scrollHeight,control.clientHeight,event.deltaY))return;
++      }
++    }
+     let widget=entry?.widget;
+     while(widget){
+-      if(widget.kind===0){event.preventDefault();this.operation(widget,"scroll",{x:widget.scroll[0]+event.deltaX,y:widget.scroll[1]+event.deltaY},`scroll:${identity(widget.key)}`);return;}
++      if(widget.kind===0&&widget.visible&&widget.enabled&&widget.inModal){
++        // Logical parents are DOM siblings. Use the shared child viewport to
++        // clamp group requests and continue through an ancestor at its bound.
++        const [,,width,height]=widget.bounds,[cx,cy,cw,ch]=widget.contentClip??[0,0,width,height];
++        const viewportWidth=Math.max(0,Math.min(width,cx+cw)-Math.max(0,cx));
++        const viewportHeight=Math.max(0,Math.min(height,cy+ch)-Math.max(0,cy));
++        const maximumX=Math.max(0,widget.contentSize[0]-viewportWidth);
++        const maximumY=Math.max(0,widget.contentSize[1]-viewportHeight);
++        const x=Math.max(0,Math.min(maximumX,widget.scroll[0]+event.deltaX));
++        const y=Math.max(0,Math.min(maximumY,widget.scroll[1]+event.deltaY));
++        if(x!==widget.scroll[0]||y!==widget.scroll[1]){
++          event.preventDefault();this.operation(widget,"scroll",{x,y},`scroll:${identity(widget.key)}`);return;
++        }
++      }
+       widget=this.snapshot.widgets.find(value=>value.key.id===widget.parent);
+     }
+   }

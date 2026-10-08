@@ -1,0 +1,11 @@
+--- a/include/gui/presentation.hpp
++++ b/include/gui/presentation.hpp
+@@ -45,7 +45,7 @@
+ inline std::string visible_text(const Widget& widget) {
+     switch(widget.spec.kind) {
+     case Kind::label:return widget.state.text;
+-    case Kind::text:return widget.state.text.empty()?widget.state.placeholder:widget.state.text;
++    case Kind::text:return widget.state.text.empty()?widget.state.placeholder:text_display(widget.state.text,widget.spec.text_policy);
+     case Kind::choice:
+         if(!widget.state.display_text.empty())return widget.state.display_text;
+         for(const auto& option:widget.state.options)if(widget.state.selected==option.id)return option.label;

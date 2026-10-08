@@ -1,5 +1,5 @@
 --- backends/terminal/main.cpp
-+++ terminal_runner.hpp
++++ backends/terminal/main.cpp
 @@ -1,5 +1,5 @@
  #include "gui/terminal.hpp"
 -#include "../../examples/application.hpp"
@@ -7,7 +7,17 @@
  #include <chrono>
  #include <iostream>
  #include <stdexcept>
-@@ -215,7 +215,8 @@
+@@ -61,6 +61,9 @@
+             const bool shift=(event.dwControlKeyState&SHIFT_PRESSED)!=0;
+             const bool control=(event.dwControlKeyState&(LEFT_CTRL_PRESSED|RIGHT_CTRL_PRESSED))!=0;
+             for(WORD repeat=0;repeat<event.wRepeatCount&&!adapter.closed();++repeat) {
++                if(control&&(event.wVirtualKeyCode=='Z'||event.wVirtualKeyCode=='Y')) {
++                    adapter.key(event.wVirtualKeyCode=='Z'?gui::Key::z:gui::Key::y,control,shift);continue;
++                }
+                 switch(event.wVirtualKeyCode) {
+                     case VK_TAB:adapter.key(gui::Key::tab,control,shift);break;
+                     case VK_RETURN:adapter.key(gui::Key::enter,control,shift);break;
+@@ -215,7 +218,8 @@
  #endif
  }
  
@@ -17,7 +27,7 @@
      if(argc==2&&std::string_view(argv[1])=="--help") {
          std::cout<<"Standalone terminal UI example\n"
                   <<"Tab/Shift-Tab: focus; Enter/Space: activate; arrows: edit/select;\n"
-@@ -227,29 +228,19 @@
+@@ -227,29 +231,19 @@
      if(argc!=1) {std::cerr<<"Usage: "<<argv[0]<<" [--help]\n";return 2;}
      try {
          TerminalHost host;

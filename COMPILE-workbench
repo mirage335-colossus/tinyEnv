@@ -1,0 +1,149 @@
+tinyEnv — build and run the optional desktop AI workbench
+
+Run from the repository root. Rust and Docker are not required for the workbench.
+Requires Git, CMake >=3.24, Ninja, Python >=3.9 and a C++20 compiler.
+The FLTK desktop host also needs the distribution's FLTK development package.
+
+Build and start the FLTK workbench on a Linux desktop:
+./build.sh workbench build release --backend fltk --build-dir build/workbench-fltk-release
+./build/workbench-fltk-release/tinyenv-workbench-fltk --root /absolute/path/to/project
+
+Or omit --root for ~/tinyEnv/casual-chats (created on first use):
+./build/workbench-fltk-release/tinyenv-workbench-fltk
+
+Use release for optimized desktop operation and dev for debugging. Changing the
+preset, backend or toolchain requires a fresh build directory.
+Run the focused offline development checks without a display or network:
+./build.sh workbench test dev --headless --build-dir build/workbench-checks
+
+Framebuffers use the existing SDL2 display/input host: install libsdl2-dev,
+then select --backend framebuffer and a fresh
+build/workbench-framebuffer-release tree.
+Rev uses --backend rev and a fresh build/workbench-rev-release tree; its existing
+prepared module toolchain is required. Retained sources are used without downloads.
+
+Chats use the .chat.md suffix; other Markdown files remain ordinary documents.
+Their companion state holds each chat's composer draft, selectors, AI settings,
+pseudocode, tabs and terminal directory. Chat changes autosave after a 300 ms
+quiet period and flush on switch/close; external changes cause a conflict and
+keep the current buffer available. Ordinary file editors retain manual Save.
+The global Tutorial and Developer checkboxes start off and persist across
+projects and restarts. Developer enables editing the otherwise read-only chat
+history. Ctrl+Z undoes, Ctrl+Y or Ctrl+Shift+Z redoes in the focused composer,
+flow source, Developer history or file editor, and
+Ctrl+Enter sends once from the composer. Copy text file… copies saved UTF-8 bytes
+to an unused project-relative path, including valid companion state for chats.
+For an autosave conflict, the file actions offer Copy retained chat and draft…
+and confirmed Discard retained changes…; the original buffer stays available
+until explicitly discarded.
+Right-click a Running Tasks row for its targeted Cancel task or Stop terminal.
+Retry beside Cancel and Send uses the recorded prompt, mode and pre-submission history with current
+visible AI/Selector settings, preserves the unsent text/images and prior attempts,
+and survives restart. Image Retry resends the original managed snapshots. It
+never infers a retry from chat Markdown or reruns automatically. Editing the
+original message or its preceding history invalidates Retry. Send/Retry use visible AI fields without Apply; a missing or
+invalid model opens AI, preserves the draft and starts no task.
+Attach image beside the composer asks for one absolute or project-relative
+PNG/JPEG path; selecting an image in Files also offers Attach image to message.
+Pending images show a filename/byte count and Remove. Limits are four images,
+4 MiB each and 8 MiB raw total. Each is copied to an immutable SHA-256 base64
+snapshot under project .tinyenv/images; state holds bounded metadata. Pending
+images survive chat switching/restart; Send clears submitted text/images after a
+successful launch, and Retry preserves the current draft. Reattach an earlier
+image for a later follow-up; ordinary history does not replay image bytes. Chat
+accepts image-only messages; Agentic still requires its current closed flow fence
+and its smaller conservative run budget also counts encoded images. Select an
+image-capable model explicitly; attaching makes no provider request. Snapshots
+are plaintext and retained without automatic cleanup; moving a chat to another
+project needs its state and project .tinyenv/images too. Missing/modified snapshots
+refuse Send/Retry. OpenAI Responses, OpenRouter and Ollama image input share the
+16 MiB default provider input limit with text/history/context; the native/runtime
+request envelope is also 16 MiB. Protocol references are in docs/workbench.md.
+Chat and agent writer replies stream into a bounded, periodically autosaved
+preview. Validated visible fragments are forwarded without waiting for another
+provider event. The desktop batches rapid fragments with a 16 ms target interval;
+provider transport, native polling and redraws still apply. This interval does
+not guarantee a frame rate or provider latency.
+Checked autosaves remain synchronous; large chats can pause updates while saving.
+Streaming stays bounded to 4,096 delta frames within an 8 MiB envelope. The final
+answer replaces its preview once; cancellation or failure retains valid partial
+text as incomplete. Critiques and internal tool envelopes are not answer
+previews. A stationary ring in the main transcript corner marks a pending reply.
+A thin graphical divider marks the end of saved nonblank main/split transcripts
+when that chat has no active Chat/Agentic reply. It has no text or timer, including
+in reopened chats and saved incomplete results. Successful Send/Retry launch
+hides it; a rejected launch retains it. Unsaved history or a save conflict hides
+it. The divider stays out of chat Markdown, state and provider context.
+Views follow the latest text/table using the reachable scroll end as wrapped
+content and scroll ranges settle, including retained incomplete output. Range
+growth or end clamping does not count as scrolling up. Scrolling up pauses
+following; scrolling back to the reachable end resumes it. Send/Retry resume
+the main view, while paused split readers retain their position through new
+output and view switches.
+Normal/split history passively formats headings, paragraphs, lists, up to
+eight quote layers, quoted fenced code, simple standalone one-line strong text
+and thematic rules, plus a restricted native Mermaid flowchart subset. Valid
+pipe tables and exact closed markdown fences containing only one table display
+native cells with drawn rules and bold headers. Selected cell text copies
+individually. Cells wrap; full rows use the outer transcript scroll, with
+horizontal scrolling in narrow lanes. Tables have at most eight columns, 32
+data rows and 128 displayed ASCII bytes per cell; input and retained ASCII
+fallback must each fit the 8 KiB block budget. Each view graphically renders
+the newest fitting tables within 384 cells and 2,097,152 bitmap device pixels;
+others keep selectable ASCII fallback. Unsupported candidates and other fenced
+code remain literal. Unfinished streamed rows can temporarily switch to
+literal text; fenced tables wait for closure. Mixed inline emphasis/code and
+Markdown images remain literal; there is no resource fetching or image preview
+decoder.
+The flowchart subset accepts bounded ASCII label punctuation and plain
+whole-line comments; circle/stadium syntax uses a rounded-box approximation.
+Simple node fill/stroke/width declarations are validated and discarded, keeping
+the fixed native palette; supported values and limits are in docs/workbench.md.
+Configuration directives and unsupported syntax remain literal code.
+Only exact message title blocks have widget borders; body paragraphs, lists and
+code remain borderless and selectable. User titles/bodies appear on
+the right and assistant titles/bodies on the left in main, split and streaming
+views.
+Non-ASCII preview text uses fixed, nonrecursive [U+XXXX] escapes (malformed
+bytes [0xXX]); saved source is unchanged. Developer edits the original Markdown
+and pauses while the chat's reply streams. Preview bounds and diagram grammar
+are documented in docs/workbench.md.
+AI requests require explicit provider configuration. Masked Provider API key
+entry has explicit Save key/Remove saved key actions for OpenRouter and OpenAI.
+Keys are plaintext in user config credentials/{openrouter,openai}.key, outside
+chat state and preferences, with POSIX directory mode 0700 and file mode 0600.
+A saved key overrides existing environment/private configuration; Remove
+restores that fallback. Unsupported storage hosts retain environment authentication, and Rev
+masked entry is unavailable. Ollama is local and unauthenticated.
+Automated checks use only local fixtures; live provider and curated-search checks
+are manual and tightly bounded.
+AI Apply remembers defaults across projects and restarts. A fresh unconfigured
+chat has a blank model unless the user has saved defaults. Existing settings
+are preserved. Builder large/small model fields also start blank; reviewed
+profiles and examples remain explicit choices.
+Blank routes for custom OpenRouter models use deepinfra,together,mistral;
+known profiles retain their exact tags and explicit allowlists remain in effect.
+Requests use data_collection:deny, allow_fallbacks:false and require_parameters:true
+within configured price ceilings. Corporate U.S./France selection is not a
+data-residency guarantee. Keep OpenRouter's own logging/data-use opt-ins off;
+the workbench does not alter account settings. Reviewed policies and limits are
+in docs/workbench.md. User chat searches can
+use general web sources; the curated source limits are for qualification.
+Blank generation controls and endpoints use the provider's defaults. Refresh models explicitly
+loads the selected provider's catalog; Add/Remove maintains a local configured list.
+Filter available models matches loaded model IDs/names locally; Clear restores
+the full catalog. Filtering makes no request or saved-model change.
+Pseudocode snippets preview before explicit insertion; built-in examples require
+Tutorial. Flow text, graph edits and snippets modify only the current composer's
+fenced flow. Agentic Send requires exactly one closed pseudocode/tinyenv/flow
+fence in the submitted message; history or saved pseudocode cannot supply it.
+The flow canvas mouse wheel zooms around the pointer from 0.2 to 2 times scale,
+up to zoom in and down to zoom out, without changing the workflow.
+There is no Zero retention control: legacy zdr settings are ignored. OpenAI
+uses store:false; Ollama sends client-managed history with no retention/store
+option, and keep_alive controls loaded-model memory.
+The AI pane does not expose account-management controls. OpenRouter documents no
+request-only prompt-injection block using a normal inference key; its persistent
+guardrail API requires a separate management key. See docs/workbench.md.
+
+Usage, provider policy and qualification limits: docs/workbench.md.

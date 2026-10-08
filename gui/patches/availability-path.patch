@@ -1,0 +1,51 @@
+--- include/gui/contract.hpp
++++ include/gui/contract.hpp
+@@ -195,14 +195,18 @@
+ // offset moves its descendants left/up, including nested groups; its own frame
+ // stays fixed. Supplying no lookup resolves the layout at zero scroll.
+ inline Availability availability(const Snapshot& view,const WidgetKey& key,const ScrollLookup& scroll={}) {
+-    struct Resolved {Availability area;Point children_translation;Rect children_clip;};
+-    std::map<std::string,Resolved,std::less<>> resolved;
+-    for(const auto& w:view.widgets) {
+-        Point translation;
+-        const Resolved* parent=nullptr;
+-        if(!w.spec.parent.empty()) {
+-            parent=&resolved.at(w.spec.parent);translation=parent->children_translation;
+-        }
++    std::vector<const Widget*> ancestors;
++    const auto* current=find_widget(view,key);
++    for(std::size_t depth=0;current&&depth<=view.widgets.size();++depth) {
++        ancestors.push_back(current);
++        if(current->spec.parent.empty())break;
++        const auto parent=current->spec.parent;current=nullptr;
++        for(const auto& candidate:view.widgets)if(candidate.spec.key.id==parent){current=&candidate;break;}
++    }
++    if(ancestors.empty()||!current||ancestors.size()>view.widgets.size())return {};
++    Point translation;Availability previous;Rect previous_clip;bool has_parent=false;
++    for(auto it=ancestors.rbegin();it!=ancestors.rend();++it) {
++        const auto& w=**it;
+         const Rect bounds{w.state.bounds.x+translation.x,w.state.bounds.y+translation.y,
+             w.state.bounds.width,w.state.bounds.height};
+         Availability a{bounds,intersect(bounds,{0,0,view.client_size.width,view.client_size.height}),
+@@ -213,9 +217,9 @@
+                 a.visible=a.visible&&page.visible;a.enabled=a.enabled&&page.enabled;
+             }
+         }
+-        if(parent) {
+-            a.clip=intersect(a.clip,parent->children_clip);
+-            a.visible=a.visible&&parent->area.visible;a.enabled=a.enabled&&parent->area.enabled;
++        if(has_parent) {
++            a.clip=intersect(a.clip,previous_clip);
++            a.visible=a.visible&&previous.visible;a.enabled=a.enabled&&previous.enabled;
+         }
+         a.visible=a.visible&&has_area(a.clip);
+         auto children_clip=a.clip;
+@@ -230,7 +234,7 @@
+                 throw std::invalid_argument("Invalid group scroll offset");
+             translation.x-=offset.x;translation.y-=offset.y;
+         }
+-        resolved.emplace(w.spec.key.id,Resolved{a,translation,children_clip});
++        previous=a;previous_clip=children_clip;has_parent=true;
+         if(w.spec.key==key){a.enabled=a.enabled&&in_modal_scope(view,key);return a;}
+     }
+     return {};

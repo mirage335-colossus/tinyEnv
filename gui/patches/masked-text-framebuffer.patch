@@ -1,0 +1,20 @@
+--- a/include/gui/framebuffer.hpp
++++ b/include/gui/framebuffer.hpp
+@@ -332,7 +332,7 @@
+             const auto selection=text_selection(widget.spec.key);
+             const double row_height=line_height(state.font);
+             const auto text_width=[&](std::size_t start,std::size_t length) {
+-                return measure_text({state.text.substr(start,length),state.font,coordinate_limit,scale_,TextWrap::none}).width;
++                return measure_text({text_display(std::string_view(state.text).substr(start,length),widget.spec.text_policy),state.font,coordinate_limit,scale_,TextWrap::none}).width;
+             };
+             const auto lines=editor_lines(widget);
+             for(std::size_t row=0;row<lines.size();++row) {
+@@ -343,7 +343,7 @@
+                     const auto left=std::clamp(first,line.begin,line.end),right=std::clamp(last,line.begin,line.end);
+                     if(right>left)fill({content.x+text_width(line.begin,left-line.begin),y,text_width(left,right-left),row_height},selection_color);
+                 }
+-                if(!state.text.empty())draw_text(std::string_view(state.text).substr(line.begin,line.end-line.begin),
++                if(!state.text.empty())draw_text(text_display(std::string_view(state.text).substr(line.begin,line.end-line.begin),widget.spec.text_policy),
+                     {content.x,y,content.width,row_height},state.font,TextWrap::none,color);
+             }
+             if(state.text.empty())draw_text(state.placeholder,content,state.font,state.wrap,muted);

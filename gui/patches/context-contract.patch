@@ -1,0 +1,48 @@
+--- include/gui/contract.hpp
++++ include/gui/contract.hpp
+@@ -83,6 +83,8 @@
+     TextPolicy text_policy;
+     bool activate_on_select=false,follow_tail=false,pointer_input=false;
+     double row_height=28;
++    // Opt-in secondary-click intent. Ordinary primary control input is unchanged.
++    bool context_input=false;
+     bool operator==(const WidgetSpec&) const = default;
+ };
+ struct BitmapView {
+@@ -149,7 +151,7 @@
+ struct InvokeAction {std::string id;};
+ // A press owns one pointer until release/cancel. Mouse click remains available
+ // for semantic-only hosts; physical hosts must not synthesize a second click.
+-enum class PointerKind { click,double_click,move,wheel,press,release,cancel };
++enum class PointerKind { click,double_click,move,wheel,press,release,cancel,context_menu };
+ struct PointerInput {
+     PointerKind kind=PointerKind::click;
+     Point position; // Absolute logical client coordinates.
+@@ -234,6 +236,17 @@
+ inline bool focusable(const Widget& w) {
+     return w.spec.kind!=Kind::group&&w.spec.kind!=Kind::label&&
+         (w.spec.kind!=Kind::bitmap||w.spec.pointer_input||!w.state.actions.empty());
++}
++// Context input belongs to the top interactive surface. Inert decorations are
++// transparent; a live ordinary control blocks an underlying context surface.
++inline std::optional<WidgetKey> context_target(const Snapshot& view,Point position,const ScrollLookup& scroll={}) {
++    if(!std::isfinite(position.x)||!std::isfinite(position.y))return std::nullopt;
++    for(auto it=view.widgets.rbegin();it!=view.widgets.rend();++it) {
++        const auto area=availability(view,it->spec.key,scroll);
++        if(!area.visible||!area.enabled||!contains(area.clip,position))continue;
++        if(it->spec.context_input||it->spec.pointer_input||focusable(*it))return it->spec.key;
++    }
++    return std::nullopt;
+ }
+ inline void validate_snapshot(const Snapshot& view) {
+     const auto require=[](bool ok,const char* message){if(!ok)throw std::invalid_argument(message);};
+@@ -364,6 +377,9 @@
+             for(const auto& action:w->state.actions)if(action.id==input.id)return action.enabled;
+             return false;
+         } else {
++            if(input.kind==PointerKind::context_menu)
++                return w->spec.context_input&&input.pointer_id==0&&input.wheel_x==0&&input.wheel_y==0&&
++                    context_target(view,input.position,scroll)==event.target;
+             switch(input.kind) {case PointerKind::click:case PointerKind::double_click:case PointerKind::move:case PointerKind::wheel:case PointerKind::press:case PointerKind::release:case PointerKind::cancel:break;
+                 default:return false;}
+             // Captured coordinates remain absolute, even outside the clip. The

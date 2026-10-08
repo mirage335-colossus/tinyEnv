@@ -42,6 +42,16 @@ read [AGENTS.md](AGENTS.md) before editing shared resources.
 For focused development, automatic compile limits and efficient release qualification,
 see [development speed](docs/development-speed.md).
 
+For optional local model access, see [OpenRouter setup](docs/openrouter.md).
+The developer helper keeps credentials in an ignored local file and has no
+effect on application builds or installed runtime dependencies.
+
+For the optional tinyEnv desktop AI workbench, see [build/run commands](COMPILE-workbench)
+and [workbench operation](docs/workbench.md). It combines file-backed Markdown
+chats, a graphical pseudocode loop editor, project browsing, a terminal and
+provider/knowledgebase controls. [Pending qualification](.agent-pending/workbench-qualification.md)
+separates focused offline checks from native and live-provider validation.
+
 ## Run the example
 
 Requires Git, CMake 3.24+, Ninja, a C++20 compiler, and Python 3.9+ for tooling/tests.

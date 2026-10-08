@@ -183,10 +183,11 @@ class PhaseTimings:
 
 def main(argv=None):
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if arguments and arguments[0] == "editor":
+    if arguments and arguments[0] in ("editor", "workbench"):
         # Dispatch before application provider, package and Rust-tool selection.
         import importlib.util
-        spec = importlib.util.spec_from_file_location("foundation_editor_build", ROOT / "editor/build.py")
+        component = arguments[0]
+        spec = importlib.util.spec_from_file_location("foundation_" + component + "_build", ROOT / component / "build.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module.main(arguments[1:])

@@ -1,0 +1,11 @@
+--- include/gui/terminal.hpp
++++ include/gui/terminal.hpp
+@@ -185,6 +185,8 @@
+                 case 16:key(Key::previous_page);break;
+                 case 19:key(Key::enter,true);break;
+                 case 21:key(Key::select_all);key(Key::backspace);break;
++                case 25:key(Key::y,true);break;
++                case 26:key(Key::z,true);break;
+                 case 32:text(" ");key(Key::space);break;
+                 default:if(value>=33)text(std::string(1,byte));break;
+             }

@@ -1,0 +1,42 @@
+--- a/include/gui/web.hpp
++++ b/include/gui/web.hpp
+@@ -122,8 +122,10 @@
+     void present(Snapshot next) override {
+         if(next.widgets.size()>4096)throw std::length_error("Browser profile permits at most 4096 widgets");
+         std::size_t strings=next.title.size(),records=0,cells=0,option_count=0,pixels=0;
+-        if(next.pages.size()>4096||next.key_bindings.size()>4096)throw std::length_error("Browser navigation limit");
++        if(next.pages.size()>4096||next.key_bindings.size()>4096||next.commands.size()>4096)throw std::length_error("Browser navigation limit");
+         for(const auto& page:next.pages)strings+=page.id.size()+page.label.size();
++        for(const auto& command:next.commands)strings+=command.key.id.size()+(command.scope?command.scope->id.size():0);
++        for(const auto& binding:next.key_bindings)strings+=binding.target.id.size()+(binding.focus?binding.focus->id.size():0);
+         if(strings>4*1024*1024)throw std::length_error("Browser presentation text limit");
+         for(const auto& w:next.widgets){
+             strings+=w.spec.key.id.size()+w.spec.page.size()+w.spec.parent.size()+w.spec.binding.size()+w.state.bitmap.source_id.size();
+@@ -179,7 +181,7 @@
+             for(auto& [key,m]:next){(void)key;if(m.id==id&&!m.exact){changed|=std::abs(m.size.width-size.width)>.01||std::abs(m.size.height-size.height)>.01;m.size=size;m.exact=true;break;}}}
+         measurements_=std::move(next);return changed;
+     }
+-    web_detail::Json presentation(){using namespace web_detail;Json::Array widgets,pages,measurements,bindings;
++    web_detail::Json presentation(){using namespace web_detail;Json::Array widgets,pages,measurements,bindings,commands;
+         if(!closed())for(const auto& paint_key:paint_order(snapshot())){const auto& w=*find_widget(snapshot(),paint_key);const auto& s=w.spec;const auto& v=w.state;const auto a=resolved_availability(s.key);
+             Json::Array records;for(const auto& r:v.records){Json::Array cells;for(const auto& c:r.cells){
+                 cells.emplace_back(Json::Object{{"text",c.text},{"bounds",rect(c.bounds)},{"font",font(c.font)},{"wrap",c.wrap==TextWrap::word}});}
+@@ -203,7 +205,8 @@
+                     {"source",v.bitmap.source_id},{"revision",std::to_string(v.bitmap.revision)}};}
+             widgets.emplace_back(std::move(out));}
+         for(const auto& p:page_tabs(snapshot()))pages.emplace_back(Json::Object{{"id",p.id},{"label",p.label},{"bounds",rect(p.bounds)},{"enabled",p.enabled},{"selected",p.selected}});
+-        for(const auto& b:snapshot().key_bindings)bindings.emplace_back(Json::Object{{"key",int(b.key)},{"control",b.control},{"shift",b.shift},{"alt",b.alt},{"focus",b.focus?key(*b.focus):Json{}}});
++        for(const auto& b:snapshot().key_bindings)bindings.emplace_back(Json::Object{{"key",int(b.key)},{"target",key(b.target)},{"control",b.control},{"shift",b.shift},{"alt",b.alt},{"focus",b.focus?key(*b.focus):Json{}}});
++        for(const auto& command:snapshot().commands)commands.emplace_back(Json::Object{{"key",key(command.key)},{"enabled",command.enabled},{"scope",command.scope?key(*command.scope):Json{}}});
+         for(const auto& [key,m]:measurements_){(void)key;if(!m.exact)measurements.emplace_back(Json::Object{{"id",m.id},{"request",m.request}});}
+         Json popup;if(popup_){const auto a=resolved_availability(*popup_);popup=Json::Object{{"key",key(*popup_)},{"revision",std::to_string(popup_revision_)},{"bounds",rect(a.bounds)},{"options",options(popup_options_)}};}
+         const auto& p=snapshot().palette;const Json palette=Json::Object{{"background",color(p.background)},{"surface",color(p.surface)},
+@@ -211,7 +214,7 @@
+             {"border",color(p.border)},{"selection",color(p.selection)},{"disabled",color(p.disabled)}};
+         const auto focused_key=focused();return Json::Object{{"revision",std::to_string(snapshot().revision)},{"title",snapshot().title},{"palette",palette},
+             {"width",snapshot().client_size.width},{"height",snapshot().client_size.height},{"scale",snapshot().display_scale},{"pages",std::move(pages)},
+-            {"activePage",snapshot().active_page?Json{*snapshot().active_page}:Json{}},{"widgets",std::move(widgets)},{"measurements",std::move(measurements)},{"keyBindings",std::move(bindings)},
++            {"activePage",snapshot().active_page?Json{*snapshot().active_page}:Json{}},{"widgets",std::move(widgets)},{"measurements",std::move(measurements)},{"keyBindings",std::move(bindings)},{"commands",std::move(commands)},
+             {"focus",focused_key?key(*focused_key):Json{}},{"popup",popup},{"closed",closed()}};
+     }
+ private:

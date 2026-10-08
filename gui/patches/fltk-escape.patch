@@ -1,0 +1,13 @@
+--- backends/fltk/adapter.hpp
++++ backends/fltk/adapter.hpp
+@@ -38,7 +38,9 @@
+         }
+         int handle(int event) override {
+             if(event==FL_HIDE||event==FL_UNFOCUS)owner_.cancel_pointer();
+-            if(event==FL_KEYDOWN) {
++            // FLTK also routes unhandled Escape as a shortcut; its default
++            // window handler would close the application on that path.
++            if(event==FL_KEYDOWN||(event==FL_SHORTCUT&&Fl::event_key()==FL_Escape)) {
+                 if(Fl::event_key()==FL_Escape)owner_.cancel_pointer();
+                 if(Fl::event_key()==FL_Tab && !Fl::event_ctrl())return owner_.focus_next(Fl::event_shift()!=0)?1:0;
+                 std::optional<ShortcutKey> key;

@@ -1,0 +1,156 @@
+--- backends/fltk/adapter.hpp
++++ backends/fltk/adapter.hpp
+@@ -10,6 +10,7 @@
+ #include <FL/Fl_Choice.H>
+ #include <FL/Fl_Double_Window.H>
+ #include <FL/Fl_Input.H>
++#include <FL/Fl_Secret_Input.H>
+ #include <FL/Fl_RGB_Image.H>
+ #include <FL/Fl_Text_Editor.H>
+ #include <FL/Fl_Text_Buffer.H>
+@@ -228,6 +229,69 @@
+             }
+             const int result=policy.read_only?Fl_Text_Display::handle(event):Fl_Text_Editor::handle(event);
+             if((event==FL_KEYDOWN || event==FL_RELEASE || event==FL_PASTE)&&find_widget(owner_.snapshot(),key_))
++                owner_.safely([&]{owner_.RetainedAdapter::text_selection(key_,selection());});
++            return result;
++        }
++    };
++    // Secret fields retain the toolkit's obscured glyphs and native caret,
++    // while edits bypass Fl_Input's process-wide ordinary undo buffer.
++    class Secret final : public Fl_Secret_Input {
++        Adapter& owner_;WidgetKey key_;
++        bool replace(std::string_view inserted,TextSelection selection) {
++            const auto* widget=find_widget(owner_.snapshot(),key_);if(!widget)return false;
++            const auto changed=replace_text(value(),selection,inserted,widget->spec.text_policy);
++            if(!changed.error.empty()||!changed.changed)return false;
++            Fl_Secret_Input::value(changed.text.c_str());this->selection(changed.selection);
++            owner_.changed(*owner_.entries_.at(key_.id));
++            if(find_widget(owner_.snapshot(),key_))owner_.RetainedAdapter::text_selection(key_,this->selection());
++            return true;
++        }
++    public:
++        Secret(Adapter& owner,WidgetKey key):Fl_Secret_Input(0,0,0,0),owner_(owner),key_(std::move(key)) {
++            readonly(1); // Native navigation/selection remains; custom edits have no native undo history.
++        }
++        TextSelection selection() const {return {std::size_t(std::max(0,mark())),std::size_t(std::max(0,position()))};}
++        void selection(TextSelection value) {value=value.clamped(this->value());position(int(value.caret),int(value.anchor));}
++        Point offset() const {return {double(std::max(0,xscroll())),0};}
++        void draw() override {
++            Fl_Secret_Input::draw();
++            fl_color(Adapter::color(owner_.focused()==key_?owner_.snapshot().palette.accent:owner_.snapshot().palette.border));fl_rect(x(),y(),w(),h());
++        }
++        int handle(int event) override {
++            if(event==FL_FOCUS&&!owner_.service_)owner_.RetainedAdapter::focus(key_);
++            const auto* widget=find_widget(owner_.snapshot(),key_);if(!widget)return 0;
++            const auto policy=widget->spec.text_policy;
++            if(event==FL_DND_ENTER||event==FL_DND_DRAG||event==FL_DND_LEAVE||event==FL_DND_RELEASE)return 1;
++            if(event==FL_PASTE) {
++                if(!policy.read_only)owner_.safely([&]{replace(std::string_view(Fl::event_text(),std::size_t(std::max(0,Fl::event_length()))),selection());});
++                return 1;
++            }
++            if(event==FL_KEYDOWN) {
++                const int key=Fl::event_key();const bool command=Fl::event_ctrl()||Fl::event_state(FL_META);
++                if((command&&(key=='c'||key=='x'||key=='z'||key=='y'||key==FL_Insert))||
++                    (Fl::event_shift()&&key==FL_Delete))return 1;
++                if(key==FL_Enter||key==FL_KP_Enter) {
++                    owner_.safely([&]{owner_.policy().enter(key_,Fl::event_ctrl()!=0,Fl::event_shift()!=0);});return 1;
++                }
++                if(!policy.read_only&&((command&&key=='v')||(Fl::event_shift()&&key==FL_Insert))) {Fl::paste(*this,1);return 1;}
++                if(!policy.read_only&&(key==FL_BackSpace||key==FL_Delete)) {
++                    owner_.safely([&]{auto selected=selection();const std::string value=this->value();
++                        if(selected.anchor==selected.caret) {
++                            if(key==FL_BackSpace&&selected.caret>0)selected.anchor=text_boundary(value,selected.caret-1);
++                            else if(key==FL_Delete&&selected.caret<value.size()) {selected.caret++;while(selected.caret<value.size()&&(static_cast<unsigned char>(value[selected.caret])&0xc0)==0x80)++selected.caret;}
++                        }
++                        replace({},selected);
++                    });return 1;
++                }
++                if(!policy.read_only&&!command&&Fl::event_length()>0&&key!=FL_Tab) {
++                    owner_.safely([&]{int erased=0;if(!Fl::compose(erased))return;auto selected=selection();
++                        if(selected.anchor==selected.caret&&erased>0)selected.anchor=text_boundary(this->value(),selected.caret-std::min(selected.caret,std::size_t(erased)));
++                        replace(std::string_view(Fl::event_text(),std::size_t(std::max(0,Fl::event_length()))),selected);
++                    });return 1;
++                }
++            }
++            const int result=Fl_Secret_Input::handle(event);
++            if((event==FL_KEYDOWN||event==FL_RELEASE)&&find_widget(owner_.snapshot(),key_))
+                 owner_.safely([&]{owner_.RetainedAdapter::text_selection(key_,selection());});
+             return result;
+         }
+@@ -425,11 +489,12 @@
+         case Kind::button:policy().send(WidgetEvent{key,Activate{}});break;
+         case Kind::toggle:policy().send(WidgetEvent{key,SetChecked{static_cast<Fl_Check_Button*>(entry.native)->value()!=0}});break;
+         case Kind::text: {
+-            auto& editor=*static_cast<Editor*>(entry.native);
+-            const std::string proposed=editor.value();
++            const auto proposed=widget.spec.text_policy.masked?std::string(static_cast<Secret*>(entry.native)->value()):static_cast<Editor*>(entry.native)->value();
+             const auto accepted=policy().send(WidgetEvent{key,EditText{proposed,widget.state.text}});
+             if(accepted==Delivery::ignored) {
+-                const auto selection=policy().text_selection(key);editor.value(widget.state.text.c_str());editor.selection(selection);
++                const auto selection=policy().text_selection(key);
++                if(widget.spec.text_policy.masked) {auto& input=*static_cast<Secret*>(entry.native);input.value(widget.state.text.c_str());input.selection(selection);}
++                else {auto& editor=*static_cast<Editor*>(entry.native);editor.value(widget.state.text.c_str());editor.selection(selection);}
+             }
+             break;
+         }
+@@ -451,7 +516,7 @@
+         case Kind::label:entry->native=new Text;break;
+         case Kind::button:entry->native=new FlatControl<Fl_Button>(*this,widget.spec.key);break;
+         case Kind::toggle:entry->native=new FlatControl<Fl_Check_Button>(*this,widget.spec.key);break;
+-        case Kind::text:entry->native=new Editor(*this,widget.spec.key);break;
++        case Kind::text:if(widget.spec.text_policy.masked)entry->native=new Secret(*this,widget.spec.key);else entry->native=new Editor(*this,widget.spec.key);break;
+         case Kind::choice:case Kind::menu:entry->native=new Choice(*this,widget.spec.key);break;
+         case Kind::list:case Kind::bitmap:entry->native=new Canvas(*this,widget.spec.key);break;
+         }
+@@ -534,7 +599,7 @@
+             if(!available.visible||!available.enabled||!contains(available.clip,position))continue;
+             auto widget=*find_widget(snapshot(),*it);
+             for(;;) {
+-                if(widget.spec.kind==Kind::group||widget.spec.kind==Kind::list||widget.spec.kind==Kind::text) {
++                if(widget.spec.kind==Kind::group||widget.spec.kind==Kind::list||(widget.spec.kind==Kind::text&&!widget.spec.text_policy.masked)) {
+                     const auto before=scroll_offset(widget.spec.key);
+                     const double step=widget.spec.kind==Kind::list?widget.spec.row_height:32;
+                     auto offset=Point{before.x+dx*step,before.y+dy*step};
+@@ -664,6 +729,13 @@
+             case Kind::label: {auto& text=static_cast<Text&>(native);text.text=widget.state.text;text.font=widget.state.font;text.wrap=widget.state.wrap;text.foreground=area.enabled?tone_color(palette,widget.state.font.tone):palette.muted;break;}
+             case Kind::toggle:static_cast<Fl_Check_Button&>(native).value(widget.state.checked);break;
+             case Kind::text: {
++                if(widget.spec.text_policy.masked) {
++                    auto& input=static_cast<Secret&>(native);input.when(FL_WHEN_CHANGED);
++                    input.color(color(palette.surface));input.textsize(int(widget.state.font.size));input.textfont(widget.state.font.bold?FL_COURIER_BOLD:FL_COURIER);
++                    input.textcolor(color(area.enabled?tone_color(palette,widget.state.font.tone):palette.muted));input.cursor_color(color(palette.accent));
++                    if(widget.state.text!=input.value()) {const auto selection=policy().text_selection(entry.key);input.value(widget.state.text.c_str());input.selection(selection);}
++                    break;
++                }
+                 auto& editor=static_cast<Editor&>(native);
+                 editor.wrapping(widget.spec.text_policy.multiline&&widget.state.wrap==TextWrap::word);
+                 editor.when(FL_WHEN_CHANGED);
+@@ -754,6 +826,7 @@
+     void text_selection(const WidgetKey& key,TextSelection selection) override {
+         RetainedAdapter::text_selection(key,selection);
+         if(auto* editor=dynamic_cast<Editor*>(native_widget(key)))editor->selection(RetainedAdapter::text_selection(key));
++        else if(auto* input=dynamic_cast<Secret*>(native_widget(key)))input->selection(RetainedAdapter::text_selection(key));
+     }
+     using RetainedAdapter::text_selection;
+     Point scroll_offset(const WidgetKey& key) const override {
+@@ -763,7 +836,10 @@
+             if(const auto pending=pending_scroll_.find(key.id);pending!=pending_scroll_.end()&&pending->second.key==key)
+                 return clamp_editor_scroll(*widget,pending->second.offset);
+             const auto entry=entries_.find(key.id);
+-            if(entry!=entries_.end()&&entry->second->key==key)return static_cast<const Editor*>(entry->second->native)->offset();
++            if(entry!=entries_.end()&&entry->second->key==key) {
++                if(widget->spec.text_policy.masked)return static_cast<const Secret*>(entry->second->native)->offset();
++                return static_cast<const Editor*>(entry->second->native)->offset();
++            }
+         }
+         return retained;
+     }
+@@ -776,6 +852,7 @@
+             return;
+         }
+         if(!std::isfinite(offset.x)||!std::isfinite(offset.y))throw std::invalid_argument("Invalid native editor scroll offset");
++        if(widget->spec.text_policy.masked)return; // Native caret navigation owns secret-field horizontal visibility.
+         pending_scroll_.insert_or_assign(key.id,PendingScroll{key,clamp_editor_scroll(*widget,offset)});
+     }
+     bool open_popup(const WidgetKey& key) override {

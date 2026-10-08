@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Bind a build to a complete portable source snapshot, including retained inputs."""
 import argparse
+from fnmatch import fnmatchcase
 import gzip
 import hashlib
 import os
@@ -14,12 +15,25 @@ from dependency_archive import archive_tree, digest, encoded, file_inventory, in
 WINDOWS = os.name == 'nt'
 
 SUPPLEMENT_PREFIX = 'third_party/retained/gui/'
+PRIVATE_ENVIRONMENT_ARTIFACT_PATTERNS = (
+    '.env~', '.#.env', '.#.env.*', '#.env#', '#.env.*#',
+    '..env.sw[a-z]', '..env.*.sw[a-z]',
+)
+
+
+def private_environment_path(name):
+    """Exclude local credentials consistently in Git and restored source trees."""
+    return any(part == '.env' or
+               (part.startswith('.env.') and part != '.env.example' and
+                not part.endswith('.example')) or
+               any(fnmatchcase(part, pattern) for pattern in PRIVATE_ENVIRONMENT_ARTIFACT_PATTERNS)
+               for part in Path(name).parts)
 
 
 def ignored_source_path(name):
     parts = Path(name).parts
     return (name == 'source.json' or parts[0] in ('build', '.agent-work', '.git') or
-            '__pycache__' in parts or name.endswith('.pyc'))
+            private_environment_path(name) or '.tinyenv' in parts or '__pycache__' in parts or name.endswith('.pyc'))
 
 
 def source_files_without_git(root):
@@ -32,7 +46,8 @@ def source_files_without_git(root):
         # File-only exclusions do not exclude directories named source.json or
         # *.pyc: their descendants remain ordinary source inputs.
         directories[:] = [name for name in directories
-                          if '__pycache__' not in (parent / name).parts and
+                          if '__pycache__' not in (parent / name).parts and '.tinyenv' not in (parent / name).parts and
+                          not private_environment_path(parent / name) and
                           (parent / name).parts[0] not in ('build', '.agent-work', '.git')]
         for name in [*directories, *filenames]:
             relative_name = (parent / name).as_posix()

@@ -1,0 +1,100 @@
+--- backends/fltk/adapter.hpp
++++ backends/fltk/adapter.hpp
+@@ -40,6 +40,9 @@
+             // FocusOut precedes iconification on native window managers. Child
+             // focus changes inside this window do not revoke native ownership.
+             if(event==FL_FOCUS) {
++                // Toolkit refresh can request focus while retiring controls.
++                // A presentation must never activate or focus another control.
++                if(owner_.refreshing_)return 1;
+                 owner_.native_unfocused_=false;
+                 if(!owner_.service_)if(const auto key=owner_.focused();key)
+                     if(auto* native=owner_.native_widget(*key);native&&native->take_focus())return 1;
+@@ -293,6 +296,7 @@
+     std::optional<WidgetKey> popup_key_;
+     std::function<void(ServiceResult)> service_reply_;
+     std::optional<ServiceResult> completed_service_;
++    bool service_return_focus_=false;
+     bool started_=false,refreshing_=false,native_unfocused_=false;
+     struct PointerCapture {WidgetKey key;Point origin,last;};
+     std::optional<PointerCapture> pointer_capture_;
+@@ -335,6 +339,9 @@
+     void cancel_pointer() {
+         if(!pointer_capture_)return;
+         const auto capture=*pointer_capture_;pointer_capture_.reset();
++        // FLTK tracks the raw press at the top-level window, independently of
++        // our retained owner. Revoking it must also end that native routing.
++        if(window_->contains(Fl::pushed()))Fl::pushed(nullptr);
+         dispatch(WidgetEvent{capture.key,PointerInput{PointerKind::cancel,capture.last,0,0,false,false,false,1}});
+         if(!closed())policy().cancel_pointer();
+     }
+@@ -533,6 +540,7 @@
+         // A completion after external focus loss or iconification must not.
+         const bool restore_focus=window_->visible()&&service_window_->contains(Fl::focus());
+         completed_service_=std::move(result);service_window_->hide();
++        service_return_focus_=restore_focus;
+         if(restore_focus)native_unfocused_=false;
+     }
+ public:
+@@ -550,7 +558,7 @@
+             const auto* widget=find_widget(snapshot(),pointer_capture_->key);
+             const auto area=resolved_availability(pointer_capture_->key);
+             if(revoke_pointer||!widget||!widget->spec.pointer_input||!area.visible||!area.enabled||!contains(area.clip,pointer_capture_->origin)||pointer_target(pointer_capture_->origin)!=pointer_capture_->key) {
+-                pointer_capture_.reset();policy().cancel_pointer();
++                cancel_pointer();
+             }
+         }
+         for(auto it=pending_scroll_.begin();it!=pending_scroll_.end();) {
+@@ -580,6 +588,7 @@
+         }
+         if(closed()) {window_->hide();if(service_window_)service_window_->hide();if(popup_)popup_->hide();return;}
+         struct Guard {bool& flag;explicit Guard(bool& value):flag(value){flag=true;}~Guard(){flag=false;}} guard(refreshing_);
++        bool return_service_focus=false;
+         if(popup_key_) {
+             const auto available=resolved_availability(*popup_key_);
+             if(!available.visible||!available.enabled) {if(popup_)popup_->hide();}
+@@ -589,6 +598,7 @@
+             popup_key_.reset();popup_.reset();popup_items_.clear();
+         }
+         if(completed_service_) {
++            return_service_focus=service_return_focus_;service_return_focus_=false;
+             auto result=std::move(*completed_service_);completed_service_.reset();service_.reset();service_window_.reset();
+             auto reply=std::move(service_reply_);if(reply)reply(std::move(result));
+         }
+@@ -676,18 +686,20 @@
+             page->button->color(color(tab->selected?palette.selection:palette.surface));page->button->labelcolor(color(palette.text));
+             window_->remove(page->button);window_->add(page->button);
+         }
+-        // Native focus restoration can activate or remap the top-level window.
+-        // Keep background/minimized focus in the retained model until the window
+-        // manager returns native focus, and leave active prompts in control.
+-        if(!service_&&!native_unfocused_&&window_->visible()) {
+-            if(const auto key=focused();key) {if(auto* native=native_widget(*key);native&&Fl::focus()!=native)native->take_focus();}
+-            else if(Fl::focus()&&window_->contains(Fl::focus()))Fl::focus(nullptr);
++        // Ordinary presentation never requests native focus: take_focus() can
++        // raise a window or switch virtual desktops. This one-shot foreground
++        // completion waits for any reply-created controls, and yields to a new
++        // prompt or popup opened by that reply.
++        if(return_service_focus&&!service_&&!popup_&&!closed()&&window_->visible()&&!native_unfocused_) {
++            if(const auto key=focused();key) {
++                if(auto* native=native_widget(*key))native->take_focus();
++            } else if(Fl::focus()&&window_->contains(Fl::focus()))Fl::focus(nullptr);
+         }
+         window_->redraw();
+     }
+     bool focus(std::optional<WidgetKey> key) override {
+         if(!RetainedAdapter::focus(key))return false;
+-        if(!service_&&!native_unfocused_&&window_->visible()) {
++        if(!service_&&!native_unfocused_&&window_->visible()&&window_->contains(Fl::focus())) {
+             if(key) { if(auto* native=native_widget(*key))native->take_focus(); }
+             else if(Fl::focus()&&window_->contains(Fl::focus()))Fl::focus(nullptr);
+         }
+@@ -763,7 +775,7 @@
+     bool service_active() const {(void)closed();return service_.has_value();}
+     void close() override {
+         pointer_capture_.reset();
+-        RetainedAdapter::close();pending_scroll_.clear();service_reply_={};completed_service_.reset();service_.reset();
++        RetainedAdapter::close();pending_scroll_.clear();service_reply_={};completed_service_.reset();service_.reset();service_return_focus_=false;
+         window_->hide();if(service_window_)service_window_->hide();if(popup_)popup_->hide();
+     }
+ };

@@ -1,0 +1,97 @@
+--- include/gui/contract.hpp
++++ include/gui/contract.hpp
+@@ -117,11 +117,13 @@
+     bool enabled=true,visible=true;
+     bool operator==(const Page&) const = default;
+ };
+-enum class ShortcutKey { escape,enter,f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12 };
++enum class ShortcutKey { escape,enter,f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,z,y };
+ struct KeyBinding {
+     ShortcutKey key=ShortcutKey::escape;
+     WidgetKey target;
+     bool control=false,shift=false,alt=false;
++    // Optional exact editor/control scope; omitted bindings are global.
++    std::optional<WidgetKey> focus={};
+ };
+ struct Snapshot {
+     std::uint64_t revision=0;
+@@ -141,7 +143,7 @@
+     std::vector<KeyBinding> key_bindings;
+     Palette palette;
+ };
+-struct Activate {};
++struct Activate {std::optional<WidgetKey> source={};};
+ struct SetChecked {bool value;};
+ struct EditText {std::string value,base_text;};
+ struct ChooseOption {std::string id;};
+@@ -165,7 +167,7 @@
+ struct PageEvent {std::string id;};
+ struct ResizeEvent {Size client_size;double display_scale=1;};
+ struct CloseEvent {};
+-struct ShortcutEvent {ShortcutKey key=ShortcutKey::escape;bool control=false,shift=false,alt=false;};
++struct ShortcutEvent {ShortcutKey key=ShortcutKey::escape;bool control=false,shift=false,alt=false;std::optional<WidgetKey> source={};};
+ using Event=std::variant<WidgetEvent,PageEvent,ResizeEvent,CloseEvent,ShortcutEvent>;
+ using EventSink=std::function<void(const Event&)>;
+ 
+@@ -331,12 +333,17 @@
+             current=parent==view.widgets.end()?nullptr:&*parent;
+         }
+     }
+-    std::set<std::tuple<ShortcutKey,bool,bool,bool>> strokes;
++    std::set<std::tuple<ShortcutKey,bool,bool,bool,std::string,std::uint64_t>> strokes;
+     for(const auto& binding:view.key_bindings) {
+-        require(binding.key>=ShortcutKey::escape&&binding.key<=ShortcutKey::f12,"Unknown shortcut key");
++        require(binding.key>=ShortcutKey::escape&&binding.key<=ShortcutKey::y,"Unknown shortcut key");
+         const auto* target=find_widget(view,binding.target);
+         require(target&&target->spec.kind==Kind::button,"Shortcut must target a current button");
+-        require(strokes.emplace(binding.key,binding.control,binding.shift,binding.alt).second,"Duplicate shortcut");
++        if(binding.focus) {
++            const auto* source=find_widget(view,*binding.focus);
++            require(source&&focusable(*source),"Shortcut focus must name a current focusable widget");
++        }
++        require(strokes.emplace(binding.key,binding.control,binding.shift,binding.alt,
++            binding.focus?binding.focus->id:std::string{},binding.focus?binding.focus->generation:0).second,"Duplicate shortcut");
+     }
+ }
+ // Shared event policy for an already validated presentation. Scroll offsets
+@@ -355,7 +362,13 @@
+         }
+     return std::visit([&](const auto& input)->bool {
+         using T=std::decay_t<decltype(input)>;
+-        if constexpr(std::is_same_v<T,Activate>)return kind==Kind::button;
++        if constexpr(std::is_same_v<T,Activate>) {
++            if(input.source) {
++                const auto* source=find_widget(view,*input.source);const auto source_area=availability(view,*input.source,scroll);
++                if(!source||!focusable(*source)||!source_area.visible||!source_area.enabled)return false;
++            }
++            return kind==Kind::button;
++        }
+         else if constexpr(std::is_same_v<T,SetChecked>)return kind==Kind::toggle&&input.value!=w->state.checked;
+         else if constexpr(std::is_same_v<T,EditText>)return kind==Kind::text&&!w->spec.text_policy.read_only&&
+             input.base_text==w->state.text&&input.value!=w->state.text&&text_error(input.value,w->spec.text_policy).empty();
+@@ -393,13 +406,20 @@
+         }
+     },event.input);
+ }
++inline const KeyBinding* shortcut_binding(const Snapshot& view,const ShortcutEvent& key) {
++    const KeyBinding* matched=nullptr;
++    for(const auto& binding:view.key_bindings)
++        if(binding.key==key.key&&binding.control==key.control&&binding.shift==key.shift&&binding.alt==key.alt&&
++            (!binding.focus||binding.focus==key.source)) {
++            matched=&binding;if(binding.focus)break;
++        }
++    return matched;
++}
+ inline bool normalize_event(const Snapshot& view,Event& event,const ScrollLookup& scroll={}) {
+     if(const auto* key=std::get_if<ShortcutEvent>(&event)) {
+-        std::optional<WidgetKey> target;
+-        for(const auto& binding:view.key_bindings)
+-            if(binding.key==key->key&&binding.control==key->control&&binding.shift==key->shift&&binding.alt==key->alt){target=binding.target;break;}
+-        if(!target)return false;
+-        event=WidgetEvent{*target,Activate{}};
++        const auto* binding=shortcut_binding(view,*key);
++        if(!binding)return false;
++        event=WidgetEvent{binding->target,Activate{key->source}};
+     }
+     return std::visit([&](auto& value)->bool {
+         using T=std::decay_t<decltype(value)>;

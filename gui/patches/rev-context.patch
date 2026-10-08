@@ -1,0 +1,32 @@
+--- backends/rev/adapter.cpp
++++ backends/rev/adapter.cpp
+@@ -366,14 +366,27 @@
+         impl.safely([&]{
+             impl.hover.reset();impl.update_tooltip();
+             if(impl.prompt){if(impl.prompt->root)Rev::Window::mouseDown(event);return;}
++            if(event.mouse.rb&&impl.pointer_capture){event.propagate=false;return;}
++            const bool context_blocked=bool(impl.popup);
+             if(impl.popup) {
+                 if(!impl.popup->root)return;
+                 const auto& rect=impl.popup->root->rect;
+                 if(!gui::contains({rect.x,rect.y,rect.w,rect.h},{event.mouse.pos.x,event.mouse.pos.y}))impl.close_popup();
+                 else {Rev::Window::mouseDown(event);return;}
+             }
+-            if(event.mouse.rb)if(const auto target=impl.hit({event.mouse.pos.x,event.mouse.pos.y},true)) {
+-                if(impl.owner.open_popup(*target)){event.propagate=false;return;}
++            if(event.mouse.rb) {
++                const Point position{event.mouse.pos.x,event.mouse.pos.y};
++                if(const auto target=context_target(impl.owner.snapshot(),position,[&](const WidgetKey& key){return impl.owner.scroll_offset(key);})) {
++                    if(find_widget(impl.owner.snapshot(),*target)->spec.context_input) {
++                        if(context_blocked){event.propagate=false;return;}
++                        impl.owner.RetainedAdapter::focus(*target);impl.dirty=true;
++                        impl.send(WidgetEvent{*target,PointerInput{PointerKind::context_menu,position,0,0,
++                            bool(event.keyboard.ctrl),bool(event.keyboard.shift),bool(event.keyboard.alt)}});
++                        event.propagate=false;return;
++                    }
++                }
++                if(const auto target=impl.hit(position,true))
++                    if(impl.owner.open_popup(*target)){event.propagate=false;return;}
+             }
+             if(impl.raw_pointer(event,event.mouse.lb?PointerKind::press:PointerKind::click))return;
+             if(const auto target=impl.hit({event.mouse.pos.x,event.mouse.pos.y},true)) {

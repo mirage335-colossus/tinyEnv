@@ -1,0 +1,227 @@
+--- backends/rev/adapter.cpp
++++ backends/rev/adapter.cpp
+@@ -162,8 +162,14 @@
+         const auto found=entries.find(key.id);
+         return found!=entries.end()&&found->second->key==key?found->second.get():nullptr;
+     }
++    bool masked_hit(Point point) const {
++        if(prompt||popup)return false;
++        const auto key=hit(point,true);
++        return key&&find_widget(owner.snapshot(),*key)->spec.text_policy.masked;
++    }
+     bool eligible(const WidgetKey& key) const {
+-        if(owner.closed()||prompt||!find_widget(owner.snapshot(),key))return false;
++        const auto* widget=find_widget(owner.snapshot(),key);
++        if(owner.closed()||prompt||!widget||widget->spec.text_policy.masked)return false;
+         const auto area=owner.resolved_availability(key);return area.enabled&&area.visible;
+     }
+     template<class F> auto callback(Entry& entry,F function) {
+@@ -188,6 +194,7 @@
+     std::optional<WidgetKey> hit(Point point,bool interactive=false) const;
+     bool raw_pointer(re::Event& event,PointerKind kind);
+     void cancel_pointer();
++    void cancel_native_pointer();
+     bool wheel(re::Event& event);
+     void key(re::Event& event);
+     void open_popup(const WidgetKey& key);
+@@ -374,10 +381,13 @@
+                 if(!gui::contains({rect.x,rect.y,rect.w,rect.h},{event.mouse.pos.x,event.mouse.pos.y}))impl.close_popup();
+                 else {Rev::Window::mouseDown(event);return;}
+             }
++            if(impl.masked_hit({event.mouse.pos.x,event.mouse.pos.y})) {
++                impl.cancel_native_pointer();event.propagate=false;return;
++            }
+             if(event.mouse.rb) {
+                 const Point position{event.mouse.pos.x,event.mouse.pos.y};
+                 if(const auto target=context_target(impl.owner.snapshot(),position,[&](const WidgetKey& key){return impl.owner.scroll_offset(key);})) {
+-                    if(find_widget(impl.owner.snapshot(),*target)->spec.context_input) {
++                    if(find_widget(impl.owner.snapshot(),*target)->spec.context_input&&impl.eligible(*target)) {
+                         if(context_blocked){event.propagate=false;return;}
+                         impl.owner.RetainedAdapter::focus(*target);impl.dirty=true;
+                         impl.send(WidgetEvent{*target,PointerInput{PointerKind::context_menu,position,0,0,
+@@ -400,7 +410,12 @@
+         });
+     }
+     void mouseUp(re::Event& event) override {
+-        impl.safely([&]{if(!impl.raw_pointer(event,PointerKind::release))Rev::Window::mouseUp(event);});
++        impl.safely([&]{
++            if(!impl.pointer_capture&&impl.masked_hit({event.mouse.pos.x,event.mouse.pos.y})) {
++                impl.cancel_native_pointer();event.propagate=false;return;
++            }
++            if(!impl.raw_pointer(event,PointerKind::release))Rev::Window::mouseUp(event);
++        });
+     }
+     void mouseMove(re::Event& event) override {
+         impl.safely([&]{
+@@ -409,7 +424,12 @@
+         });
+     }
+     void mouseDrag(re::Event& event) override {
+-        impl.safely([&]{if(!impl.pointer_capture)Rev::Window::mouseDrag(event);});
++        impl.safely([&]{
++            if(!impl.pointer_capture&&impl.masked_hit({event.mouse.pos.x,event.mouse.pos.y})) {
++                impl.cancel_native_pointer();event.propagate=false;return;
++            }
++            if(!impl.pointer_capture)Rev::Window::mouseDrag(event);
++        });
+     }
+     void mouseWheel(re::Event& event) override {
+         impl.safely([&]{if(!impl.raw_pointer(event,PointerKind::wheel)&&!impl.wheel(event))Rev::Window::mouseWheel(event);});
+@@ -452,14 +472,24 @@
+         entry.choice->optionsContainer->style->visibility=Visibility::Hidden;
+         entry.activate=callback(entry,[this](const WidgetKey& key){owner.open_popup(key);});break;
+     case Kind::text:
+-        entry.control=entry.editor=new Editor(*this,entry.clip.get(),entry.key);
+-        entry.label=new re::Text(entry.clip.get(),"");
+-        entry.label->style->overflow=Overflow::Hide;entry.label->interceptHits=false;break;
++        if(widget.spec.text_policy.masked) {
++            // The toolkit has no secret layout primitive. This unavailable
++            // control never receives the clear value or an editable text node.
++            entry.control=entry.label=new re::Text(entry.clip.get(),"Masked input unavailable");
++            entry.label->editable=false;entry.label->selectable=false;
++            entry.label->style->overflow=Overflow::Hide;
++            entry.clip->interceptHits=true;entry.label->interceptHits=true;
++        } else {
++            entry.control=entry.editor=new Editor(*this,entry.clip.get(),entry.key);
++            entry.label=new re::Text(entry.clip.get(),"");
++            entry.label->style->overflow=Overflow::Hide;entry.label->interceptHits=false;
++        }
++        break;
+     case Kind::list:
+         entry.control=new re::Box(entry.clip.get());entry.label=new re::Text(entry.control,"");break;
+     case Kind::bitmap:entry.control=entry.bitmap=new Bitmap(entry.clip.get());break;
+     }
+-    entry.control->tabStop=widget.spec.kind!=Kind::label&&widget.spec.kind!=Kind::group;
++    entry.control->tabStop=widget.spec.kind!=Kind::label&&widget.spec.kind!=Kind::group&&!widget.spec.text_policy.masked;
+     return result;
+ }
+ void Adapter::Impl::apply_rows(Entry& entry,const Widget& widget) {
+@@ -512,7 +542,7 @@
+     entry.bounds=area.bounds;entry.clipping=area.clip;
+     place(entry.clip.get(),area.clip);entry.clip->style->zIndex=order;
+     entry.clip->style->visibility=area.visible?Visibility::Visible:Visibility::Hidden;
+-    entry.clip->setDisabled(!area.enabled||bool(prompt));
++    entry.clip->setDisabled(!area.enabled||bool(prompt)||widget.spec.text_policy.masked);
+     const Rect local{area.bounds.x-area.clip.x,area.bounds.y-area.clip.y,area.bounds.width,area.bounds.height};
+     place(entry.control,local);
+     const Color foreground=area.enabled?tone_color(palette,widget.state.font.tone):palette.muted;
+@@ -547,6 +577,10 @@
+         entry.label->content=widget.state.text;text_style(entry.label,widget.state.font,foreground,widget.state.wrap);
+         entry.label->style->overflow=Overflow::Hide;
+     }
++    if(widget.spec.kind==Kind::text&&widget.spec.text_policy.masked) {
++        text_style(entry.label,widget.state.font,palette.muted);
++        flat(entry.control,palette,palette.disabled);spacing(entry.control->style->padding,4);
++    }
+     if(entry.editor) {
+         auto& edit=*entry.editor;edit.policy=widget.spec.text_policy;edit.editable=!edit.policy.read_only;
+         if(edit.content.get()!=widget.state.text)edit.content=widget.state.text;
+@@ -570,7 +604,7 @@
+         if(owner.policy().repaint(entry.key))entry.bitmap->upload_pending=true;
+         if(entry.bitmap->upload_pending)entry.bitmap->upload(owner.policy().image(entry.key));
+     }
+-    if(owner.focused()==entry.key&&area.enabled&&!prompt) {
++    if(owner.focused()==entry.key&&area.enabled&&!prompt&&!widget.spec.text_policy.masked) {
+         auto* target=entry.toggle?static_cast<re::Element*>(entry.toggle->checkbox):entry.choice?static_cast<re::Element*>(entry.choice->dropdown):entry.control;
+         target->style->border.color=color(palette.accent);
+         if(widget.spec.kind!=Kind::bitmap)target->style->border.width=1_px;
+@@ -598,7 +632,7 @@
+         return;
+     }
+     if(popup)return;
+-    auto key=owner.policy().focused();auto* current=key?entry(*key):nullptr;
++    auto key=owner.policy().focused();auto* current=key&&eligible(*key)?entry(*key):nullptr;
+     re::Element* target=current?current->control:nullptr;
+     if(current&&current->toggle)target=current->toggle->checkbox;
+     if(current&&current->choice)target=current->choice->dropdown;
+@@ -612,7 +646,7 @@
+     }
+ }
+ void Adapter::Impl::editor_clipboard(Editor& editor,const std::string& command) {
+-    if(!editor.allowed())return;
++    if(!editor.allowed()||editor.policy.masked)return;
+     const auto selected=editor.selection();
+     if(command=="c"||command=="x") {
+         const auto first=std::min(selected.anchor,selected.caret),last=std::max(selected.anchor,selected.caret);
+@@ -707,8 +741,11 @@
+     for(auto it=order.rbegin();it!=order.rend();++it) {
+         const auto area=owner.resolved_availability(*it);
+         const auto* widget=find_widget(owner.snapshot(),*it);
+-        if(area.enabled&&area.visible&&contains(area.clip,point)&&
+-            (!interactive||widget->spec.pointer_input||focusable(*widget)))return *it;
++        if(area.visible&&contains(area.clip,point)) {
++            // A disabled secret placeholder still occludes controls behind it.
++            if(widget->spec.text_policy.masked)return *it;
++            if(area.enabled&&(!interactive||widget->spec.pointer_input||focusable(*widget)))return *it;
++        }
+     }
+     return std::nullopt;
+ }
+@@ -730,6 +767,7 @@
+     }
+     if(pointer_capture){event.propagate=false;return true;}
+     const auto target=hit(position,true);
++    if(target&&find_widget(owner.snapshot(),*target)->spec.text_policy.masked) {event.propagate=false;return true;}
+     if(!target||!find_widget(owner.snapshot(),*target)->spec.pointer_input)return false;
+     const auto clicks=event.mouse.lb.isDoubleClick()?2u:1u;
+     if(kind==PointerKind::press) {
+@@ -740,6 +778,16 @@
+         kind==PointerKind::wheel?-event.mouse.wheel.x/120.0:0,kind==PointerKind::wheel?event.mouse.wheel.y/120.0:0,
+         control,shift,alt,kind==PointerKind::press?1u:0u,clicks}});
+     event.propagate=false;return true;
++}
++void Adapter::Impl::cancel_native_pointer() {
++    if(!window)return;
++    const auto clear=[&](auto&& self,re::Element* element)->void {
++        if(element->targetFlags.press||element->targetFlags.drag) {
++            element->targetFlags.press=false;element->targetFlags.drag=false;element->dirty.style=true;
++        }
++        for(auto* child:element->children)self(self,child);
++    };
++    clear(clear,window.get());
+ }
+ void Adapter::Impl::cancel_pointer() {
+     if(!pointer_capture)return;
+@@ -805,6 +853,9 @@
+                 }
+             }
+         } else owner.focus_next(keyboard.shift);
++        event.propagate=false;return;
++    }
++    if(const auto key=owner.focused();key&&find_widget(owner.snapshot(),*key)->spec.text_policy.masked) {
+         event.propagate=false;return;
+     }
+     std::optional<ShortcutKey> shortcut;
+@@ -979,11 +1030,22 @@
+     return impl_->measure_text(request);
+ }
+ bool Adapter::focus(std::optional<WidgetKey> key) {
++    policy().require_interaction();
++    if(key)if(const auto* widget=find_widget(snapshot(),*key);widget&&widget->spec.text_policy.masked)return false;
+     const bool result=RetainedAdapter::focus(std::move(key));impl_->dirty=true;
+     if(!impl_->depth&&!closed())impl_->focus_shared();return result;
+ }
+ bool Adapter::focus_next(bool reverse) {
+-    const bool result=RetainedAdapter::focus_next(reverse);impl_->dirty=true;
++    bool result=false;
++    for(std::size_t remaining=snapshot().widgets.size()+1;remaining;--remaining) {
++        result=RetainedAdapter::focus_next(reverse);
++        const auto key=focused();const auto* widget=key?find_widget(snapshot(),*key):nullptr;
++        if(!result||!widget||!widget->spec.text_policy.masked)break;
++    }
++    if(const auto key=focused();key&&find_widget(snapshot(),*key)->spec.text_policy.masked) {
++        RetainedAdapter::focus(std::nullopt);result=false;
++    }
++    impl_->dirty=true;
+     if(!impl_->depth&&!closed())impl_->focus_shared();return result;
+ }
+ void Adapter::text_selection(const WidgetKey& key,TextSelection selection) {
+@@ -996,7 +1058,7 @@
+ void Adapter::scroll(const WidgetKey& key,Point offset) {
+     RetainedAdapter::scroll(key,offset);impl_->dirty=true;
+     const auto* widget=find_widget(snapshot(),key);
+-    if(widget&&widget->spec.kind==Kind::text) {
++    if(widget&&widget->spec.kind==Kind::text&&!widget->spec.text_policy.masked) {
+         const auto measured=measure_text({widget->state.text,widget->state.font,std::max(0.0,widget->state.bounds.width-8),snapshot().display_scale,widget->state.wrap});
+         const auto maximum=Point{std::max(0.0,measured.width+1-std::max(0.0,widget->state.bounds.width-8)),
+             std::max(0.0,measured.height-std::max(0.0,widget->state.bounds.height-8))};

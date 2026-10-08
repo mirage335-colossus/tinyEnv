@@ -1,0 +1,84 @@
+--- a/backends/fltk/adapter.hpp
++++ b/backends/fltk/adapter.hpp
+@@ -298,6 +298,7 @@
+     std::optional<ServiceResult> completed_service_;
+     bool service_return_focus_=false;
+     bool started_=false,refreshing_=false,native_unfocused_=false;
++    bool sync_pending_=true;
+     struct PointerCapture {WidgetKey key;Point origin,last;};
+     std::optional<PointerCapture> pointer_capture_;
+     unsigned callback_depth_=0;
+@@ -447,11 +448,22 @@
+         fl_color(color(snapshot().palette.surface));fl_rectf(native.x(),native.y(),native.w(),native.h());
+         if(widget.spec.kind==Kind::bitmap) {
+             policy().repaint(key);
+-            BitmapImage image(policy().image(key).width(),policy().image(key).height(),PixelFormat::rgb24);
+-            image.blit(0,0,policy().image(key).block());
++            const auto& retained=policy().image(key);
++            std::unique_ptr<BitmapImage> converted;
++            if(retained.format()!=PixelFormat::rgb24) {
++                converted=std::make_unique<BitmapImage>(retained.width(),retained.height(),PixelFormat::rgb24);
++                converted->blit(0,0,retained.block());
++            }
++            const auto& image=converted?*converted:retained;
+             if(image.width()&&image.height()&&native.w()>0&&native.h()>0) {
++                // Borrow CPU pixels only during this synchronous native draw.
++                // No native image retains a pointer across a new presentation.
+                 Fl_RGB_Image pixels(image.pixels().data(),int(image.width()),int(image.height()),3,int(image.block().stride_bytes));
+-                const std::unique_ptr<Fl_Image> scaled(pixels.copy(native.w(),native.h()));scaled->draw(native.x(),native.y());
++                if(int(image.width())==native.w()&&int(image.height())==native.h())
++                    pixels.draw(native.x(),native.y());
++                else {
++                    const std::unique_ptr<Fl_Image> scaled(pixels.copy(native.w(),native.h()));scaled->draw(native.x(),native.y());
++                }
+             }
+         } else {
+             const auto offset=scroll_offset(key);
+@@ -554,6 +566,7 @@
+         const bool revoke_pointer=snapshot().client_size!=view.client_size||snapshot().display_scale!=view.display_scale||
+             snapshot().active_page!=view.active_page||snapshot().modal_root!=view.modal_root;
+         RetainedAdapter::present(std::move(view));
++        sync_pending_=true;
+         if(pointer_capture_) {
+             const auto* widget=find_widget(snapshot(),pointer_capture_->key);
+             const auto area=resolved_availability(pointer_capture_->key);
+@@ -595,13 +608,17 @@
+         }
+         if(popup_&&!popup_->shown()) {
+             if(popup_key_&&find_widget(snapshot(),*popup_key_))RetainedAdapter::close_popup(*popup_key_);
+-            popup_key_.reset();popup_.reset();popup_items_.clear();
++            popup_key_.reset();popup_.reset();popup_items_.clear();sync_pending_=true;
+         }
+         if(completed_service_) {
++            sync_pending_=true;
+             return_service_focus=service_return_focus_;service_return_focus_=false;
+             auto result=std::move(*completed_service_);completed_service_.reset();service_.reset();service_window_.reset();
+             auto reply=std::move(service_reply_);if(reply)reply(std::move(result));
+         }
++        // Idle task polling must not schedule a complete native redraw. Prompt
++        // completion and popup retirement above still run without a snapshot.
++        if(!sync_pending_&&pending_scroll_.empty())return;
+         window_->copy_label(snapshot().title.c_str());window_->color(color(snapshot().palette.background));
+         const auto& palette=snapshot().palette;
+         for(auto it=entries_.begin();it!=entries_.end();) {
+@@ -695,7 +712,10 @@
+                 if(auto* native=native_widget(*key))native->take_focus();
+             } else if(Fl::focus()&&window_->contains(Fl::focus()))Fl::focus(nullptr);
+         }
+-        window_->redraw();
++        window_->redraw();sync_pending_=false;
++    }
++    void invalidate(const WidgetKey& key,PixelRect damage) override {
++        RetainedAdapter::invalidate(key,damage);sync_pending_=true;
+     }
+     bool focus(std::optional<WidgetKey> key) override {
+         if(!RetainedAdapter::focus(key))return false;
+@@ -729,7 +749,7 @@
+     void scroll(const WidgetKey& key,Point offset) override {
+         policy().require_interaction();
+         const auto* widget=find_widget(snapshot(),key);
+-        if(!widget||widget->spec.kind!=Kind::text) {RetainedAdapter::scroll(key,offset);return;}
++        if(!widget||widget->spec.kind!=Kind::text) {RetainedAdapter::scroll(key,offset);sync_pending_=true;return;}
+         if(!std::isfinite(offset.x)||!std::isfinite(offset.y))throw std::invalid_argument("Invalid native editor scroll offset");
+         pending_scroll_.insert_or_assign(key.id,PendingScroll{key,clamp_editor_scroll(*widget,offset)});
+     }

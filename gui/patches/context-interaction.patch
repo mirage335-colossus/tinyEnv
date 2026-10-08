@@ -1,0 +1,20 @@
+--- include/gui/interaction.hpp
++++ include/gui/interaction.hpp
+@@ -296,8 +296,16 @@
+         }
+     }
+     void context_menu(Point position) {
+-        if(closed()||prompt_||popup_)return;
++        if(closed()||prompt_||popup_||gesture_)return;
+         policy().require_interaction();
++        if(const auto target=context_target(snapshot(),position,[&](const WidgetKey& key){return scroll_offset(key);})) {
++            const auto* widget=find_widget(snapshot(),*target);
++            if(widget->spec.context_input) {
++                focus(*target);
++                policy().send(WidgetEvent{*target,PointerInput{PointerKind::context_menu,position}});
++                return;
++            }
++        }
+         const auto order=paint_order(snapshot());
+         for(auto it=order.rbegin();it!=order.rend();++it) {
+             const auto area=resolved_availability(*it);

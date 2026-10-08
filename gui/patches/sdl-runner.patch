@@ -1,5 +1,5 @@
 --- backends/framebuffer/main_sdl.cpp
-+++ sdl_runner.hpp
++++ backends/framebuffer/main_sdl.cpp
 @@ -1,4 +1,7 @@
 -#include "host.hpp"
 +#include "host/native_session.hpp"
@@ -9,7 +9,16 @@
  #include <SDL.h>
  #include <cstring>
  #include <iostream>
-@@ -54,11 +57,16 @@
+@@ -17,6 +20,8 @@
+ std::optional<gui::Key> translate(SDL_Keycode key,SDL_Keymod mods) {
+     if((mods&KMOD_CTRL)!=0) {
+         if(key==SDLK_a)return gui::Key::select_all;
++        if(key==SDLK_z)return gui::Key::z;
++        if(key==SDLK_y)return gui::Key::y;
+         if(key==SDLK_n)return gui::Key::next_page;
+         if(key==SDLK_p)return gui::Key::previous_page;
+         if(key==SDLK_q)return gui::Key::quit;
+@@ -54,11 +59,16 @@
      require(SDL_SetClipboardText(value.c_str())==0,"Clipboard write failed");
      if(key==SDLK_x)adapter.text("");
  }
@@ -28,7 +37,7 @@
          int width=0,height=0,physical_width=0,physical_height=0;
          SDL_GetWindowSize(window,&width,&height);require(SDL_GetRendererOutputSize(renderer,&physical_width,&physical_height)==0,"Cannot query renderer size");
          (void)physical_height;
-@@ -70,55 +78,48 @@
+@@ -70,55 +80,48 @@
          const auto symbol=event.key.keysym.sym;
          if((mods&KMOD_CTRL)!=0&&(symbol==SDLK_c||symbol==SDLK_v||symbol==SDLK_x))clipboard(adapter,symbol);
          else if(const auto translated=translate(symbol,mods))adapter.key(*translated,(mods&KMOD_CTRL)!=0,(mods&KMOD_SHIFT)!=0,(mods&KMOD_ALT)!=0);
@@ -114,7 +123,7 @@
          const auto initial=session.adapter.frame();
          Window window(SDL_CreateWindow(session.adapter.snapshot().title.c_str(),SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,
              int(initial.width),int(initial.height),SDL_WINDOW_RESIZABLE|SDL_WINDOW_ALLOW_HIGHDPI|(self_test?SDL_WINDOW_HIDDEN:0)),SDL_DestroyWindow);
-@@ -127,13 +128,14 @@
+@@ -127,13 +130,14 @@
          require(bool(renderer),"Renderer creation failed");
          Texture texture(nullptr,SDL_DestroyTexture);unsigned texture_width=0,texture_height=0;std::uint64_t displayed=0;
          SDL_StartTextInput();
@@ -133,7 +142,7 @@
              }
              session.tick();if(session.adapter.closed())break;
              const auto frame=session.adapter.frame(displayed);
-@@ -150,20 +152,10 @@
+@@ -150,20 +154,10 @@
              }
              require(SDL_RenderClear(renderer.get())==0,"Renderer clear failed");
              require(SDL_RenderCopy(renderer.get(),texture.get(),nullptr,nullptr)==0,"Frame presentation failed");SDL_RenderPresent(renderer.get());displayed=frame.revision;

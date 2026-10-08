@@ -1,0 +1,59 @@
+--- a/backends/web/renderer.mjs
++++ b/backends/web/renderer.mjs
+@@ -84,12 +84,17 @@
+       });
+     } else if (widget.kind === 5) {
+       entry.control = this.element(widget.multiline ? "textarea" : "input", "control editor", node);
+-      if (!widget.multiline) entry.control.type = "text";
++      if (!widget.multiline) entry.control.type = widget.masked ? "password" : "text";
+       entry.suggestions = this.element("select", "suggestions", node);
+       entry.suggestions.setAttribute("aria-label", "Text suggestions");
+       entry.suggestions.addEventListener("change", () => {
+         const id = entry.suggestions.value; if (id) act("choose", {id}); entry.suggestions.value = "";
+       });
++      // Password controls keep ordinary paste/IME/editing, but cannot export
++      // their contents through native clipboard or drag gestures.
++      for (const kind of ["copy", "cut", "dragstart"]) entry.control.addEventListener(kind, event => {
++        if (entry.widget.masked) { event.preventDefault(); event.stopImmediatePropagation(); }
++      }, {capture:true});
+       entry.control.addEventListener("compositionstart", () => { entry.composing = true; });
+       entry.control.addEventListener("compositionend", () => { entry.composing = false; this.edit(entry); });
+       entry.control.addEventListener("input", event => { if (!event.isComposing && !entry.composing) this.edit(entry); });
+@@ -245,7 +250,7 @@
+     node.hidden = !widget.visible; node.title = widget.help;
+     node.inert = !widget.inModal || !widget.enabled;
+     control.disabled = !widget.enabled; control.setAttribute("aria-disabled", String(!widget.enabled));
+-    control.setAttribute("aria-label", widget.accessibleName || widget.label || widget.text);
++    control.setAttribute("aria-label", widget.accessibleName || widget.label || (widget.kind === 5 && widget.masked ? "Masked text" : widget.text));
+     this.setFont(node, widget.font);
+     this.setFont(control, widget.font);
+     if (widget.kind === 0) {
+@@ -265,6 +270,14 @@
+       }
+     }
+     else if (widget.kind === 5) {
++      // Set the native masking mode before assigning any text. A changed text
++      // policy requires a new shared generation and therefore a fresh control.
++      if (!widget.multiline) control.type = widget.masked ? "password" : "text";
++      if (widget.masked) {
++        control.spellcheck = false; control.draggable = false;
++        control.setAttribute("autocomplete", "off"); control.setAttribute("autocorrect", "off");
++        control.setAttribute("autocapitalize", "none");
++      }
+       const pending = this.pendingEdits.has(identity(widget.key)) || entry.composing;
+       if (!pending && control.value !== widget.text) control.value = widget.text;
+       control.readOnly = widget.readOnly; control.placeholder = widget.placeholder;
+@@ -275,9 +288,10 @@
+         control.style.overflowX=widget.wrap?"hidden":"auto";
+         control.style.overflowY="auto";
+       }
+-      entry.suggestions.hidden = !widget.options.length; entry.suggestions.disabled = !widget.enabled || widget.readOnly;
+-      control.style.paddingRight = widget.options.length ? "28px" : "4px";
+-      this.fillOptions(entry.suggestions, widget.options, null, "▾");
++      const options = widget.masked ? [] : widget.options;
++      entry.suggestions.hidden = !options.length; entry.suggestions.disabled = widget.masked || !widget.enabled || widget.readOnly;
++      control.style.paddingRight = options.length ? "28px" : "4px";
++      this.fillOptions(entry.suggestions, options, null, "▾");
+       if (!pending && !entry.pendingSelection && JSON.stringify(entry.lastSelection) !== JSON.stringify(widget.selection)) {
+         const [anchor, caret] = widget.selection;
+         control.setSelectionRange(utf16Offset(control.value, Math.min(anchor,caret)), utf16Offset(control.value, Math.max(anchor,caret)), anchor > caret ? "backward" : "forward");

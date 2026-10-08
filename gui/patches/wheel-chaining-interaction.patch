@@ -1,0 +1,15 @@
+--- include/gui/interaction.hpp
++++ include/gui/interaction.hpp
+@@ -544,8 +544,10 @@
+     void scroll_hit(Widget current,const PointerInput& input) {
+         for(;;) {
+             if(current.spec.kind==Kind::list||current.spec.kind==Kind::group||current.spec.kind==Kind::text) {
+-                auto offset=scroll_offset(current.spec.key);offset.x+=input.wheel_x*32;offset.y-=input.wheel_y*32;
+-                scroll(current.spec.key,offset);return;
++                const auto before=scroll_offset(current.spec.key);
++                auto offset=before;offset.x+=input.wheel_x*32;offset.y-=input.wheel_y*32;
++                scroll(current.spec.key,offset);
++                if(scroll_offset(current.spec.key)!=before)return;
+             }
+             if(current.spec.parent.empty())return;
+             const auto parent=std::find_if(snapshot().widgets.begin(),snapshot().widgets.end(),[&](const Widget& widget){return widget.spec.key.id==current.spec.parent;});

@@ -1,0 +1,20 @@
+--- include/gui/framebuffer.hpp
++++ include/gui/framebuffer.hpp
+@@ -326,7 +326,7 @@
+             break;
+         }
+         case Kind::text: {
+-            fill(box,a.enabled?panel:disabled_color);outline(box,border_color);
++            fill(box,a.enabled?panel:disabled_color);if(state.text_frame)outline(box,border_color);
+             const auto offset=scroll_offset(widget.spec.key);auto content=text_bounds(widget);content.x-=offset.x;content.y-=offset.y;content.width+=offset.x;content.height+=offset.y;
+             clip_=intersect(clip_,{box.x+3,box.y+2,std::max(0.0,box.width-6),std::max(0.0,box.height-4)});
+             const auto selection=text_selection(widget.spec.key);
+@@ -380,7 +380,7 @@
+         }
+         }
+         clip_=a.clip;
+-        if(focused()==widget.spec.key) {
++        if(focused()==widget.spec.key&&(widget.spec.kind!=Kind::text||state.text_frame)) {
+             if(widget.spec.kind==Kind::toggle)outline({box.x,box.y+3,std::min(20.0,box.width),std::min(20.0,std::max(0.0,box.height-3))},accent);
+             else outline(box,accent);
+         }

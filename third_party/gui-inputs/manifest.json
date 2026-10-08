@@ -1,5 +1,5 @@
 {
-  "archive_sha256": "e77ed3649430a5807ce4b86320671e0a696ff69e43b5bd6885f837d000884a6f",
+  "archive_sha256": "ba26724e26235b5cd7961c62c26499394b00d911de4cdcc15f31b79faf41d93c",
   "files": {
     "foundation/gui/patches/adapter-portability.patch": {
       "mode": 420,
@@ -10,6 +10,26 @@
       "mode": 420,
       "sha256": "9fcc8f0b85c4abdd33041e1ba7b1a6cfac5f3a79db048b3cd78ccdcc018b8aa2",
       "size": 2197
+    },
+    "foundation/gui/patches/availability-path.patch": {
+      "mode": 420,
+      "sha256": "7f39def5aa767b7b86ed492bda81eb4c4d81f2182dfab8ae0bf1d94d0e914f78",
+      "size": 2690
+    },
+    "foundation/gui/patches/bitmap-copy.patch": {
+      "mode": 420,
+      "sha256": "2d1c7ad0979882639784a8eb1e3bfc466b3bedb9d5812134bed2d78c87e60044",
+      "size": 2695
+    },
+    "foundation/gui/patches/context-contract.patch": {
+      "mode": 420,
+      "sha256": "e3d8253d51f36fbea281f034286474edcf2effe2c469bd86e89ee0a8d0f28058",
+      "size": 2749
+    },
+    "foundation/gui/patches/context-interaction.patch": {
+      "mode": 420,
+      "sha256": "b2a6bc354b0db35542275b1b14863ac9fe8438cbdb36643d668424f0d9ef072f",
+      "size": 877
     },
     "foundation/gui/patches/contract-portability.patch": {
       "mode": 420,
@@ -26,6 +46,41 @@
       "sha256": "cb206470c4254ebb21033299ce9dd8ef1f9f91b8ba6ff442b03e58a5142290f9",
       "size": 12106
     },
+    "foundation/gui/patches/fltk-background-focus.patch": {
+      "mode": 420,
+      "sha256": "b49543f13ff3dc43cd9716118b92d84a65cd9be04525f5df8c0f739fcd7737da",
+      "size": 3458
+    },
+    "foundation/gui/patches/fltk-bitmap.patch": {
+      "mode": 420,
+      "sha256": "17ba58cc773e1b05081b290fb097aa5eefd9f91e103c9fc78b79d17457833e4e",
+      "size": 4960
+    },
+    "foundation/gui/patches/fltk-context.patch": {
+      "mode": 420,
+      "sha256": "8bf80fd5bb77b7c8cbb128ef8d6ef3cf8eae319d0a1c8fec4c2184f22c5f0620",
+      "size": 1532
+    },
+    "foundation/gui/patches/fltk-escape.patch": {
+      "mode": 420,
+      "sha256": "06fccf4bdedc0c0347a91e90bb17a8a1944bfa67a2d567f9f0c9de52df997bbd",
+      "size": 718
+    },
+    "foundation/gui/patches/fltk-interactions.patch": {
+      "mode": 420,
+      "sha256": "7bfebe8d38ad0fca0440d05e5bec9a30bf8965504bf6cc5697908842df4f2ded",
+      "size": 6246
+    },
+    "foundation/gui/patches/fltk-masked-text.patch": {
+      "mode": 420,
+      "sha256": "81b3271c75abf47c61c04a2bebd81ccc63322f6ab43479f1c4a099d18f136a34",
+      "size": 10930
+    },
+    "foundation/gui/patches/fltk-native-ownership.patch": {
+      "mode": 420,
+      "sha256": "f5c4cf6a53e3af289d8e3eb3340fbcd13ab0d5b780ae424a6a7d679f765970e3",
+      "size": 5981
+    },
     "foundation/gui/patches/fltk-pointer.patch": {
       "mode": 420,
       "sha256": "f5bee29f80652a504c5b9f7e875f21fb12071b8f1e5756317684eec18a3dad26",
@@ -35,6 +90,61 @@
       "mode": 420,
       "sha256": "9c0dc8035757a39b90d6f5fab394dcfc71d8b7797135565447330bcccb36be3e",
       "size": 3190
+    },
+    "foundation/gui/patches/fltk-text-scroll.patch": {
+      "mode": 420,
+      "sha256": "38fd44c1cc88d4e2fcac24aac7427017aa26b193fa8b5f0ae1f13e94f8412a66",
+      "size": 3484
+    },
+    "foundation/gui/patches/masked-text-contract.patch": {
+      "mode": 420,
+      "sha256": "37075fbe3790c73402caba953953a0901111ee7c3c6fa9d32f753dc414bb9e98",
+      "size": 952
+    },
+    "foundation/gui/patches/masked-text-framebuffer.patch": {
+      "mode": 420,
+      "sha256": "e1848f09ce72c5e0d8ca2733f67782e85262bad481efbb4d862e3ee8f37b639d",
+      "size": 1533
+    },
+    "foundation/gui/patches/masked-text-interaction.patch": {
+      "mode": 420,
+      "sha256": "254e881456f2a05e3292e0494205b934a39da189b834f99bd93ed96609a2f34c",
+      "size": 4741
+    },
+    "foundation/gui/patches/masked-text-policy.patch": {
+      "mode": 420,
+      "sha256": "242f160639d20ade86e8b52b523df9c6b27549e0a76dadffdc85b393d7b54eb1",
+      "size": 2345
+    },
+    "foundation/gui/patches/masked-text-presentation.patch": {
+      "mode": 420,
+      "sha256": "62c00c333f5567e036ccc4108589a1c6124e08e436c13026be5b444fbf04cba7",
+      "size": 674
+    },
+    "foundation/gui/patches/masked-text-terminal.patch": {
+      "mode": 420,
+      "sha256": "929d1d3c9c60291ec9210816751ad076cb48eb82fadbfe1a8bd23dfc8d483147",
+      "size": 1428
+    },
+    "foundation/gui/patches/nonvisual-command-contract.patch": {
+      "mode": 420,
+      "sha256": "4f0ec6d4805fde97adad9f85f03049ab4f8c788134f5c69a44c2efb9eb06fdaf",
+      "size": 4815
+    },
+    "foundation/gui/patches/nonvisual-command-memory.patch": {
+      "mode": 420,
+      "sha256": "aad30ca3d092750b6c6c134e4436ab3c6be8129c0d3b3a460954c89cd8330b8a",
+      "size": 1880
+    },
+    "foundation/gui/patches/nonvisual-command-renderer.patch": {
+      "mode": 420,
+      "sha256": "f86618eb3d06eb9f481d95ab261623c84f404b975a43bc13fe611adaaf20ece2",
+      "size": 2268
+    },
+    "foundation/gui/patches/nonvisual-command-web.patch": {
+      "mode": 420,
+      "sha256": "eadbee8921e59ba987fa1475de9794e9fd1a8ebb75d83b79bcde3d323f97e9d2",
+      "size": 4639
     },
     "foundation/gui/patches/rev-build.patch": {
       "mode": 420,
@@ -51,10 +161,20 @@
       "sha256": "02d2b9075e54f8899d98204ce57b215f65b0d766e813c3e50ce09412e0b2b832",
       "size": 1878
     },
+    "foundation/gui/patches/rev-context.patch": {
+      "mode": 420,
+      "sha256": "2dbf1f365fbaae487fc4c03ba04fc8917043c55a1817f8890ef2c14780f32dcc",
+      "size": 2105
+    },
     "foundation/gui/patches/rev-dependencies.patch": {
       "mode": 420,
       "sha256": "334468d9002189f5d420f7b93d487bd826588c3e46a1dc0d3de250826a87bbc6",
       "size": 446
+    },
+    "foundation/gui/patches/rev-masked-text.patch": {
+      "mode": 420,
+      "sha256": "d49d464b746c224b0a5d92aaf27c1ca9c52d68d1ba8956a1c2b26ef0602d129f",
+      "size": 12287
     },
     "foundation/gui/patches/rev-pointer-probe.patch": {
       "mode": 420,
@@ -66,10 +186,30 @@
       "sha256": "459110f5201f904fd3ea5925d75ebc0686c58b6e048356a9dcb5348b3bd2c47a",
       "size": 12948
     },
+    "foundation/gui/patches/rev-shortcuts.patch": {
+      "mode": 420,
+      "sha256": "1fdfd43b249ff58ddc0703c1c989f90b37163b084d8f4539a58d7f056d0118e4",
+      "size": 1052
+    },
     "foundation/gui/patches/sdl-runner.patch": {
       "mode": 420,
-      "sha256": "e9d44e408656c35cc6d7df627a02c65ca0238b82987f3afa1d27fd8c4b3b74cc",
-      "size": 10177
+      "sha256": "60340c542f410daec3adb95a358ebf158a0b6dacae9f747d81073a933d2e6272",
+      "size": 10611
+    },
+    "foundation/gui/patches/shortcut-contract.patch": {
+      "mode": 420,
+      "sha256": "2b9012d32a60ece6b0486f37413853f28c39b9efdff32f43d4eb9c9145491d01",
+      "size": 4966
+    },
+    "foundation/gui/patches/shortcut-interaction.patch": {
+      "mode": 420,
+      "sha256": "130d9b31b90926ea1f1dd5efa4b072e7715a06ef4e6769ded54ad166b15509fc",
+      "size": 1967
+    },
+    "foundation/gui/patches/shortcut-memory.patch": {
+      "mode": 420,
+      "sha256": "a9586e4838b33b565108869009931153fa68c2807eb66f1dad137a9d56eaf6b7",
+      "size": 2986
     },
     "foundation/gui/patches/terminal-caret.patch": {
       "mode": 420,
@@ -78,8 +218,43 @@
     },
     "foundation/gui/patches/terminal-runner.patch": {
       "mode": 420,
-      "sha256": "c434d0b117acbcebb57aad7a6c9ee928814edf52b86aad8a1f1b029737750953",
-      "size": 2249
+      "sha256": "51b6ff4fb2b940f58ac8ad15d4e35b48abeba9711119804252b2a11dbee1a104",
+      "size": 2970
+    },
+    "foundation/gui/patches/terminal-shortcuts.patch": {
+      "mode": 420,
+      "sha256": "6c79e97bd8d0e4b8f0610af3506bd70cfe1a3b7f89bf8bc6c5dec0106d3bf73f",
+      "size": 502
+    },
+    "foundation/gui/patches/text-frame-contract.patch": {
+      "mode": 420,
+      "sha256": "287167e4a67d1b3359f5f801e577fdaad34a186a4fe26c5772e1f3e9977e7fcb",
+      "size": 1159
+    },
+    "foundation/gui/patches/text-frame-fltk.patch": {
+      "mode": 420,
+      "sha256": "cd2d8973f6ab476d6d5ca39bbc310b34f8edf35d6f485437ff53e5053517eaa2",
+      "size": 1602
+    },
+    "foundation/gui/patches/text-frame-framebuffer.patch": {
+      "mode": 420,
+      "sha256": "1df035538a1acd5865cdd43dcaed64fc4002d5e50f1cd93ad6e276974f7b15a9",
+      "size": 1081
+    },
+    "foundation/gui/patches/text-frame-renderer.patch": {
+      "mode": 420,
+      "sha256": "5aae8185831b457c2b5738a5d353023fcd0f5d5677b616a5a54809ab462b1dbb",
+      "size": 566
+    },
+    "foundation/gui/patches/text-frame-rev.patch": {
+      "mode": 420,
+      "sha256": "df720b922dc17233169c1e589e090cfa172d06187216c7a3719ed4b328d2bbff",
+      "size": 510
+    },
+    "foundation/gui/patches/text-frame-web.patch": {
+      "mode": 420,
+      "sha256": "d518f7a3331ccad67b5f183590297f44559a0506433d3cd2bf856664f6137bbc",
+      "size": 1450
     },
     "foundation/gui/patches/touch-contract.patch": {
       "mode": 420,
@@ -101,6 +276,16 @@
       "sha256": "08e240539cec3beed46938cb24ebe5d220bd18f6553301264aa92e85cb301901",
       "size": 5848
     },
+    "foundation/gui/patches/web-context-renderer.patch": {
+      "mode": 420,
+      "sha256": "f339d7bd920230bf47b6170fbb881d29771221ed30967c42c1362b4307976d2d",
+      "size": 1210
+    },
+    "foundation/gui/patches/web-context.patch": {
+      "mode": 420,
+      "sha256": "b25f0f094f50b814eaff7a32127c2322f0643a293bf8fd2cf58b2af3c1f2a714",
+      "size": 3737
+    },
     "foundation/gui/patches/web-embedding.patch": {
       "mode": 420,
       "sha256": "8dddda2270d65497c7410a9e539ade3d0bf51216d033bd6b306b518ba411528a",
@@ -120,6 +305,16 @@
       "mode": 420,
       "sha256": "908f27f1ffa4b761ea9139e7ef6ced457da52e9ce0af8454e26970d65f196da5",
       "size": 4905
+    },
+    "foundation/gui/patches/web-masked-text-renderer.patch": {
+      "mode": 420,
+      "sha256": "9b1623437a78b6926828f521a02f02c9910cb9004aac382f26386385667a402f",
+      "size": 3916
+    },
+    "foundation/gui/patches/web-masked-text.patch": {
+      "mode": 420,
+      "sha256": "62dabf5162bd8a5b0322f9ec48d7cfa1e02c1ed51c092fd1b6fea6322f8a052b",
+      "size": 1391
     },
     "foundation/gui/patches/web-ordering-test.patch": {
       "mode": 420,
@@ -141,6 +336,16 @@
       "sha256": "6bc6bdbec4b11bb3e5db15b52684ce36406d7afabe42690d118ab4aa9e4ca507",
       "size": 10161
     },
+    "foundation/gui/patches/web-shortcuts-renderer.patch": {
+      "mode": 420,
+      "sha256": "710d85719c244af48da584d796745a11ded6a327bc83a810e2eba6d851c1e55c",
+      "size": 2173
+    },
+    "foundation/gui/patches/web-shortcuts.patch": {
+      "mode": 420,
+      "sha256": "dc8d895814660d8506281de0ad8bd233cfeb6cfba5c539ea6dd8074d6efa12ff",
+      "size": 2142
+    },
     "foundation/gui/patches/web-split.patch": {
       "mode": 420,
       "sha256": "d9f8b71c9b8ea6c90424166e0b8b83f52a4e8de9342044fc731bae58c74f61d5",
@@ -151,10 +356,20 @@
       "sha256": "4c3bda2e1b239debb201a672fac1792bbc31d2d77e989a683f51f7ebe6edad43",
       "size": 5532
     },
+    "foundation/gui/patches/wheel-chaining-interaction.patch": {
+      "mode": 420,
+      "sha256": "12a53f61a229dfb63de1b448283e3d2e05cb3a927aa6ce672a2fc6bab8661f84",
+      "size": 971
+    },
+    "foundation/gui/patches/wheel-chaining-renderer.patch": {
+      "mode": 420,
+      "sha256": "6a6c45c25220e0a40a16da1ff40859c71fffa1d92a7d0b5cf9fa8831ac189cec",
+      "size": 2678
+    },
     "foundation/third_party/gui-boundary.lock.json": {
       "mode": 420,
-      "sha256": "7b7d549d70d456f607462c6a6b82dc661bf0f9d9dab394a54a0ea473f75419d4",
-      "size": 13633
+      "sha256": "ae51ae039e61aced5e440a255ca555ec84db64f6083e20c8acab8a920b360755",
+      "size": 19790
     },
     "upstream/.github/workflows/screenshots.yml": {
       "mode": 420,

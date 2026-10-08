@@ -1,0 +1,20 @@
+--- include/gui/web.hpp
++++ include/gui/web.hpp
+@@ -203,7 +203,7 @@
+                     {"source",v.bitmap.source_id},{"revision",std::to_string(v.bitmap.revision)}};}
+             widgets.emplace_back(std::move(out));}
+         for(const auto& p:page_tabs(snapshot()))pages.emplace_back(Json::Object{{"id",p.id},{"label",p.label},{"bounds",rect(p.bounds)},{"enabled",p.enabled},{"selected",p.selected}});
+-        for(const auto& b:snapshot().key_bindings)bindings.emplace_back(Json::Object{{"key",int(b.key)},{"control",b.control},{"shift",b.shift},{"alt",b.alt}});
++        for(const auto& b:snapshot().key_bindings)bindings.emplace_back(Json::Object{{"key",int(b.key)},{"control",b.control},{"shift",b.shift},{"alt",b.alt},{"focus",b.focus?key(*b.focus):Json{}}});
+         for(const auto& [key,m]:measurements_){(void)key;if(!m.exact)measurements.emplace_back(Json::Object{{"id",m.id},{"request",m.request}});}
+         Json popup;if(popup_){const auto a=resolved_availability(*popup_);popup=Json::Object{{"key",key(*popup_)},{"revision",std::to_string(popup_revision_)},{"bounds",rect(a.bounds)},{"options",options(popup_options_)}};}
+         const auto& p=snapshot().palette;const Json palette=Json::Object{{"background",color(p.background)},{"surface",color(p.surface)},
+@@ -320,7 +320,7 @@
+             adapter_.policy().send(ResizeEvent{size,op.at("scale").number()});return;}
+         if(type=="page"){adapter_.policy().send(PageEvent{op.at("id").str()});return;}
+         if(type=="shortcut"){const auto code=op.at("key").number();
+-            if(code<0||code>int(ShortcutKey::f12)||std::floor(code)!=code)throw std::invalid_argument("Unknown shortcut");
++            if(code<0||code>int(ShortcutKey::y)||std::floor(code)!=code)throw std::invalid_argument("Unknown shortcut");
+             adapter_.policy().send(ShortcutEvent{static_cast<ShortcutKey>(int(code)),op.at("control").boolean(),op.at("shift").boolean(),op.at("alt").boolean()});return;}
+         if(type=="close"){adapter_.policy().send(CloseEvent{});return;}
+         const auto target=key(op.at("key"));const auto* widget=find_widget(adapter_.snapshot(),target);

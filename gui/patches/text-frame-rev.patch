@@ -1,0 +1,12 @@
+--- backends/rev/adapter.cpp
++++ backends/rev/adapter.cpp
+@@ -609,6 +609,9 @@
+         target->style->border.color=color(palette.accent);
+         if(widget.spec.kind!=Kind::bitmap)target->style->border.width=1_px;
+     }
++    // Hide decoration after the focused style while retaining native geometry.
++    if(widget.spec.kind==Kind::text&&!widget.state.text_frame)
++        entry.control->style->border.color=rgba(0,0,0,0);
+ }
+ void Adapter::Impl::focus_native(re::Element* target) {
+     if(!window)return;

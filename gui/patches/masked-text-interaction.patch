@@ -1,0 +1,66 @@
+--- a/include/gui/interaction.hpp
++++ b/include/gui/interaction.hpp
+@@ -291,7 +291,7 @@
+                 const auto offset=scroll_offset(id);const auto box=text_bounds(widget);
+                 const auto lines=editor_lines(widget);
+                 const auto line=std::min(lines.size()-1,static_cast<std::size_t>(std::max(0.0,std::floor((input.position.y-box.y+offset.y)/line_height(widget.state.font)))));
+-                const auto at=offset_on_line(widget.state.text,widget.state.font,lines[line],input.position.x-box.x+offset.x);
++                const auto at=offset_on_line(widget.state.text,widget.state.font,lines[line],input.position.x-box.x+offset.x,widget.spec.text_policy);
+                 select_visual(id,{input.shift?text_selection(id).anchor:at,at},line);
+             }
+             return;
+@@ -356,7 +356,7 @@
+                 std::size_t first=0;
+                 while(first+1<boundaries.size()) {
+                     const auto fits=[&](std::size_t index) {
+-                        return measured_width(text,widget.state.font,boundaries[first],boundaries[index])<=width;
++                        return measured_width(text,widget.state.font,boundaries[first],boundaries[index],widget.spec.text_policy)<=width;
+                     };
+                     auto low=first,high=first+1;std::size_t step=1;
+                     while(fits(high)) {
+@@ -396,7 +396,7 @@
+     Point editor_caret_position(const Widget& widget,std::size_t caret) const {
+         const auto lines=editor_lines(widget);const auto row=editor_line_index(widget,caret);
+         const auto& line=lines[row];caret=std::clamp(text_boundary(widget.state.text,caret),line.begin,line.end);
+-        return {measured_width(widget.state.text,widget.state.font,line.begin,caret),double(row)*line_height(widget.state.font)};
++        return {measured_width(widget.state.text,widget.state.font,line.begin,caret,widget.spec.text_policy),double(row)*line_height(widget.state.font)};
+     }
+     double popup_row_height() const {
+         const auto natural=std::max(24.0,line_height()+8);
+@@ -474,21 +474,21 @@
+     }
+     Point editor_maximum(const Widget& widget) const {
+         const auto lines=editor_lines(widget);double width=0;
+-        for(const auto& line:lines)width=std::max(width,measured_width(widget.state.text,widget.state.font,line.begin,line.end));
++        for(const auto& line:lines)width=std::max(width,measured_width(widget.state.text,widget.state.font,line.begin,line.end,widget.spec.text_policy));
+         const Size natural{width,std::min(coordinate_limit,double(lines.size())*line_height(widget.state.font))};
+         const auto box=text_bounds(widget);
+         const double caret_space=widget.spec.text_policy.multiline&&widget.state.wrap==TextWrap::word?0:1;
+         return {std::max(0.0,std::max(widget.state.content_size.width,natural.width+caret_space)-box.width),
+             std::max(0.0,std::max(widget.state.content_size.height,natural.height)-box.height)};
+     }
+-    double measured_width(const std::string& text,const Font& font,std::size_t begin,std::size_t end) const {
+-        return measure_text({text.substr(begin,end-begin),font,coordinate_limit,snapshot().display_scale,TextWrap::none}).width;
+-    }
+-    std::size_t offset_on_line(const std::string& value,const Font& font,VisualLine line,double x) const {
++    double measured_width(const std::string& text,const Font& font,std::size_t begin,std::size_t end,const TextPolicy& policy={}) const {
++        return measure_text({text_display(std::string_view(text).substr(begin,end-begin),policy),font,coordinate_limit,snapshot().display_scale,TextWrap::none}).width;
++    }
++    std::size_t offset_on_line(const std::string& value,const Font& font,VisualLine line,double x,const TextPolicy& policy={}) const {
+         double previous=0;
+         for(auto at=line.begin;at<line.end;) {
+             const auto next=interaction_detail::next(value,at);
+-            const auto width=measured_width(value,font,line.begin,next);
++            const auto width=measured_width(value,font,line.begin,next,policy);
+             if(x<(previous+width)/2)return at;
+             previous=width;at=next;
+         }
+@@ -508,7 +508,7 @@
+             const auto x=editor_caret_position(widget,selection.caret).x;
+             if(input==Key::up&&row>0)--row;
+             else if(input==Key::down&&row+1<lines.size())++row;
+-            selection.caret=offset_on_line(widget.state.text,widget.state.font,lines[row],x);
++            selection.caret=offset_on_line(widget.state.text,widget.state.font,lines[row],x,widget.spec.text_policy);
+         }
+         if(!shift)selection.anchor=selection.caret;
+         select_visual(widget.spec.key,selection,row);return true;

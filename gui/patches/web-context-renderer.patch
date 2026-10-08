@@ -1,0 +1,20 @@
+--- renderer_dom.mjs
++++ renderer_dom.mjs
+@@ -173,7 +173,16 @@
+     }, true);
+     node.addEventListener("pointermove", event => pointer(event, "move"));
+     node.addEventListener("wheel", event => pointer(event, "wheel"), {passive: false});
+-    node.addEventListener("contextmenu",event=>{if(entry.widget.kind===7&&entry.widget.actions.length){event.preventDefault();act("popupOpen");}});
++    node.addEventListener("contextmenu",event=>{
++      if(this.activePointers.size){event.preventDefault();return;}
++      if(entry.widget.contextInput) {
++        event.preventDefault();event.stopPropagation();
++        if(this.snapshot?.popup)return;
++        const bounds=this.root.getBoundingClientRect();
++        act("pointer",{kind:"context",pointerId:"0",x:event.clientX-bounds.left,y:event.clientY-bounds.top,
++          wheelX:0,wheelY:0,control:event.ctrlKey,shift:event.shiftKey,alt:event.altKey});
++      } else if(entry.widget.kind===7&&entry.widget.actions.length){event.preventDefault();act("popupOpen");}
++    });
+     entry.control.addEventListener("focus", () => {
+       if(entry.updating)return;
+       const version=(this.focusVersion||0)+1;this.focusVersion=version;this.pendingFocus=version;

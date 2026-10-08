@@ -1,0 +1,47 @@
+--- a/include/gui/bitmap.hpp
++++ b/include/gui/bitmap.hpp
+@@ -210,6 +210,15 @@
+         for (unsigned row = 0; row < input.height; ++row)
+             std::copy_n(input.bytes.data() + input.stride_bytes * row, row_bytes,
+                         copy.data() + row_bytes * row);
++        // Preserve the owned input copy above, including self-overlapping
++        // blits. Equal byte-addressable formats need no pixel conversion.
++        if (input.format == format_ && format_ != PixelFormat::mono1) {
++            const auto offset = pixel_row_bytes(x, format_);
++            for (unsigned row = 0; row < input.height; ++row)
++                std::copy_n(copy.data() + row_bytes * row, row_bytes,
++                            pixels_.data() + stride_ * (y + row) + offset);
++            return;
++        }
+         for (unsigned row = 0; row < input.height; ++row)
+             for (unsigned col = 0; col < input.width; ++col)
+                 bitmap_detail::write(pixels_.data() + stride_ * (y + row), x + col, format_,
+@@ -218,6 +227,14 @@
+     void clear(PixelRect area) {
+         bitmap_detail::contained(area, {0, 0, width_, height_});
+         if (bitmap_detail::empty(area)) return;
++        if (format_ != PixelFormat::mono1) {
++            const auto offset = pixel_row_bytes(area.x, format_);
++            const auto bytes = pixel_row_bytes(area.width, format_);
++            for (unsigned row = 0; row < area.height; ++row)
++                std::fill_n(pixels_.data() + stride_ * (area.y + row) + offset, bytes, std::uint8_t{0});
++            return;
++        }
++        // Packed pixels retain their individual bit boundaries and tail bits.
+         for (unsigned row = 0; row < area.height; ++row)
+             for (unsigned col = 0; col < area.width; ++col)
+                 bitmap_detail::write(pixels_.data() + stride_ * (area.y + row),
+@@ -354,8 +371,11 @@
+             explicit Guard(bool& value) : flag(value) { flag = true; }
+             ~Guard() { flag = false; }
+         } guard(painting_);
+-        BitmapImage next = image_;
+-        next.clear(*damage_);
++        const bool full = *damage_ == PixelRect{0, 0, image_.width(), image_.height()};
++        // A complete replacement starts black without copying and clearing the
++        // previous grid. The old committed image still survives a failed paint.
++        BitmapImage next = full ? BitmapImage(image_.width(), image_.height(), image_.format()) : image_;
++        if (!full) next.clear(*damage_);
+         source_.paint({image_.width(), image_.height(), *damage_, image_.format()},
+             [&](unsigned x, unsigned y, PixelBlock block) { next.blit(x, y, block); });
+         image_ = std::move(next);

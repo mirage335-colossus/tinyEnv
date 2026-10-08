@@ -1,0 +1,95 @@
+--- include/gui/contract.hpp
++++ include/gui/contract.hpp
+@@ -125,6 +125,14 @@
+     // Optional exact editor/control scope; omitted bindings are global.
+     std::optional<WidgetKey> focus={};
+ };
++// Nonvisual action identity. No geometry, native control or focus target.
++struct Command {
++    WidgetKey key;
++    bool enabled=true;
++    // Exact current widget/group containing the initiating focused control.
++    // Omitted scopes are unavailable while a modal presentation is active.
++    std::optional<WidgetKey> scope={};
++};
+ struct Snapshot {
+     std::uint64_t revision=0;
+     std::string title;
+@@ -142,6 +150,8 @@
+     std::optional<WidgetKey> modal_root;
+     std::vector<KeyBinding> key_bindings;
+     Palette palette;
++    // Commands share the widget ID/generation namespace but never render.
++    std::vector<Command> commands={};
+ };
+ struct Activate {std::optional<WidgetKey> source={};};
+ struct SetChecked {bool value;};
+@@ -175,6 +185,10 @@
+     for(const auto& w:view.widgets)if(w.spec.key==key)return &w;
+     return nullptr;
+ }
++inline const Command* find_command(const Snapshot& view,const WidgetKey& key) {
++    for(const auto& command:view.commands)if(command.key==key)return &command;
++    return nullptr;
++}
+ inline bool in_modal_scope(const Snapshot& view,const WidgetKey& key) {
+     if(!view.modal_root)return true;
+     const auto* current=find_widget(view,key);
+@@ -242,6 +256,22 @@
+ inline bool focusable(const Widget& w) {
+     return w.spec.kind!=Kind::group&&w.spec.kind!=Kind::label&&
+         (w.spec.kind!=Kind::bitmap||w.spec.pointer_input||!w.state.actions.empty());
++}
++inline bool command_available(const Snapshot& view,const Command& command,
++                              const std::optional<WidgetKey>& source,const ScrollLookup& scroll={}) {
++    if(!command.enabled||!source)return false;
++    const auto* current=find_widget(view,*source);const auto source_area=availability(view,*source,scroll);
++    if(!current||!focusable(*current)||!source_area.visible||!source_area.enabled)return false;
++    if(!command.scope)return !view.modal_root;
++    const auto scope_area=availability(view,*command.scope,scroll);
++    if(!scope_area.visible||!scope_area.enabled)return false;
++    for(std::size_t depth=0;current&&depth<=view.widgets.size();++depth) {
++        if(current->spec.key==*command.scope)return true;
++        if(current->spec.parent.empty())return false;
++        const auto parent=current->spec.parent;current=nullptr;
++        for(const auto& candidate:view.widgets)if(candidate.spec.key.id==parent){current=&candidate;break;}
++    }
++    return false;
+ }
+ // Context input belongs to the top interactive surface. Inert decorations are
+ // transparent; a live ordinary control blocks an underlying context surface.
+@@ -324,6 +354,13 @@
+         }
+         text(v.bitmap.source_id);
+     }
++    std::set<std::string> commands;
++    for(const auto& command:view.commands) {
++        text(command.key.id);
++        require(!command.key.id.empty()&&command.key.generation!=0&&!widgets.contains(command.key.id)&&
++            commands.insert(command.key.id).second,"Invalid or duplicate command key");
++        require(!command.scope||find_widget(view,*command.scope),"Command scope must name a current widget");
++    }
+     if(view.modal_root) {
+         const auto* root=find_widget(view,*view.modal_root);
+         require(root&&root->spec.kind==Kind::group,"Modal root must name a current group");
+@@ -343,7 +380,8 @@
+     for(const auto& binding:view.key_bindings) {
+         require(binding.key>=ShortcutKey::escape&&binding.key<=ShortcutKey::y,"Unknown shortcut key");
+         const auto* target=find_widget(view,binding.target);
+-        require(target&&target->spec.kind==Kind::button,"Shortcut must target a current button");
++        require((target&&target->spec.kind==Kind::button)||find_command(view,binding.target),
++            "Shortcut must target a current button or command");
+         if(binding.focus) {
+             const auto* source=find_widget(view,*binding.focus);
+             require(source&&focusable(*source),"Shortcut focus must name a current focusable widget");
+@@ -358,6 +396,10 @@
+ // discard events for which this returns false. Lifetime and dispatch guards
+ // remain the adapter's responsibility.
+ inline bool normalize_widget_event(const Snapshot& view,WidgetEvent& event,const ScrollLookup& scroll={}) {
++    if(const auto* command=find_command(view,event.target)) {
++        const auto* activate=std::get_if<Activate>(&event.input);
++        return activate&&command_available(view,*command,activate->source,scroll);
++    }
+     const auto* w=find_widget(view,event.target);const auto a=availability(view,event.target,scroll);
+     if(!w||!a.visible||!a.enabled)return false;
+     const auto kind=w->spec.kind;

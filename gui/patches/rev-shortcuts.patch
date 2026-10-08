@@ -1,0 +1,14 @@
+--- backends/rev/adapter.cpp
++++ backends/rev/adapter.cpp
+@@ -809,8 +809,10 @@
+     }
+     std::optional<ShortcutKey> shortcut;
+     if(keyboard.escape)shortcut=ShortcutKey::escape;else if(keyboard.enter)shortcut=ShortcutKey::enter;
++    else if(keyboard.key=="z")shortcut=ShortcutKey::z;else if(keyboard.key=="y")shortcut=ShortcutKey::y;
+     else for(int index=1;index<=12;++index)if(keyboard.key=="f"+std::to_string(index))shortcut=ShortcutKey(int(ShortcutKey::f1)+index-1);
+-    if(shortcut&&owner.policy().send(ShortcutEvent{*shortcut,bool(keyboard.ctrl),bool(keyboard.shift),bool(keyboard.alt)})==Delivery::delivered) {
++    if(shortcut&&shortcut_binding(owner.snapshot(),ShortcutEvent{*shortcut,bool(keyboard.ctrl),bool(keyboard.shift),bool(keyboard.alt),owner.focused()})) {
++        owner.policy().send(ShortcutEvent{*shortcut,bool(keyboard.ctrl),bool(keyboard.shift),bool(keyboard.alt)});
+         dirty=true;event.propagate=false;return;
+     }
+     const auto focused=owner.policy().focused();auto* control=focused?entry(*focused):nullptr;

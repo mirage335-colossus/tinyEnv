@@ -1,0 +1,26 @@
+--- backends/fltk/adapter.hpp
++++ backends/fltk/adapter.hpp
+@@ -211,8 +211,10 @@
+         }
+         void draw() override {
+             Fl_Text_Editor::draw();
+-            fl_color(Adapter::color(owner_.focused()==key_?owner_.snapshot().palette.accent:owner_.snapshot().palette.border));fl_rect(x(),y(),w(),h());
+             const auto* widget=find_widget(owner_.snapshot(),key_);
++            if(!widget||widget->state.text_frame) {
++                fl_color(Adapter::color(owner_.focused()==key_?owner_.snapshot().palette.accent:owner_.snapshot().palette.border));fl_rect(x(),y(),w(),h());
++            }
+             if(!widget||buffer()->length()!=0||widget->state.placeholder.empty())return;
+             LiteralDrawing literal;
+             const auto& font=widget->state.font;fl_font(font.bold?FL_COURIER_BOLD:FL_COURIER,int(font.size));
+@@ -271,7 +273,10 @@
+         Point offset() const {return {double(std::max(0,xscroll())),0};}
+         void draw() override {
+             Fl_Secret_Input::draw();
+-            fl_color(Adapter::color(owner_.focused()==key_?owner_.snapshot().palette.accent:owner_.snapshot().palette.border));fl_rect(x(),y(),w(),h());
++            const auto* widget=find_widget(owner_.snapshot(),key_);
++            if(!widget||widget->state.text_frame) {
++                fl_color(Adapter::color(owner_.focused()==key_?owner_.snapshot().palette.accent:owner_.snapshot().palette.border));fl_rect(x(),y(),w(),h());
++            }
+         }
+         int handle(int event) override {
+             if(event==FL_FOCUS&&!owner_.service_)owner_.RetainedAdapter::focus(key_);

@@ -1,7 +1,10 @@
 from pathlib import Path
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
+import tarfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
@@ -47,6 +50,76 @@ class SourceIdentityTests(unittest.TestCase):
         (self.source / 'build').mkdir()
         (self.source / 'build/output').write_text('generated')
         self.assertEqual(before, source_tree(self.source))
+
+    def test_local_environment_secrets_are_excluded_from_plain_and_restored_archives(self):
+        templates = ['.env.example', '.env.openrouter.example', 'module/.env.service.example']
+        retained = [*templates, '..env.openrouter.source', '..env.openrouter.szz', '#ordinary#']
+        for name in retained:
+            path = self.source / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('API_KEY=\n')
+        before = source_tree(self.source)
+        self.assertTrue(set(retained) <= set(before['files']))
+        secrets = ['.env', '.env.openrouter', '.env.openrouter.bak', '.env.openrouter~',
+                   'module/.env.service', 'module/.env.service.example~', '.env~', '.#.env',
+                   '.#.env.openrouter', '#.env#', '#.env.openrouter#', '..env.swp',
+                   'module/..env.openrouter.swp', 'module/..env.openrouter.swo',
+                   '#.env.openrouter.example#', '.#.env.openrouter.example']
+        for name in secrets:
+            path = self.source / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('inert local credential fixture')
+        private_directory = self.source / 'module/.env.private-directory'
+        private_directory.mkdir()
+        (private_directory / 'credential').write_text('inert local credential fixture')
+        scan = os.scandir
+        def checked_scan(path):
+            self.assertNotEqual(Path(path), private_directory, 'private subtree was traversed')
+            return scan(path)
+        for manifest in (False, True):
+            with self.subTest(restored=manifest):
+                if manifest:
+                    (self.source / 'source.json').write_text(json.dumps(before))
+                with patch.object(source_module.os, 'scandir', side_effect=checked_scan):
+                    self.assertEqual(before, source_tree(self.source))
+                archive = self.root / ('restored.tar.gz' if manifest else 'plain.tar.gz')
+                self.assertEqual(before, archive_source(self.source, archive))
+                with tarfile.open(archive) as contents:
+                    self.assertEqual(set(contents.getnames()), {*before['files'], 'source.json'})
+                    self.assertTrue(set(retained) <= set(contents.getnames()))
+                    self.assertTrue(set(secrets).isdisjoint(contents.getnames()))
+        (self.source / '.env.openrouter').write_text('changed inert local credential fixture')
+        self.assertEqual(before, source_tree(self.source))
+
+    @unittest.skipUnless(shutil.which('git'), 'Git required for force-index fixture')
+    def test_local_environment_secrets_are_excluded_even_when_git_tracks_them(self):
+        secrets = ['.env.openrouter', '.env~', '.#.env.openrouter', '#.env.openrouter#',
+                   '..env.openrouter.swp']
+        for name in secrets:
+            (self.source / name).write_text('inert forced-index credential fixture')
+        (self.source / '.env.openrouter.example').write_text('OPENROUTER_API_KEY=\n')
+        shutil.copyfile(Path(__file__).resolve().parents[1] / '.gitignore', self.source / '.gitignore')
+        before = source_tree(self.source)
+        environment = {name: value for name, value in os.environ.items() if not name.startswith('GIT_')}
+        environment.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull,
+                           GIT_CONFIG_SYSTEM=os.devnull)
+        command = ['git', '-C', str(self.source), '-c', 'core.hooksPath=' + os.devnull,
+                   '-c', 'user.name=Source fixture', '-c', 'user.email=source@example.invalid']
+        for arguments in (['init', '--quiet', '--template='], ['add', '--all', '--force'],
+                          ['commit', '--quiet', '-m', 'Source fixture']):
+            subprocess.run([*command, *arguments], env=environment, check=True,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        ignored = subprocess.run([*command, 'check-ignore', '--no-index', '--stdin'],
+                                 input='\n'.join([*secrets, '.env.openrouter.example']) + '\n',
+                                 env=environment, text=True, check=True, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE).stdout.splitlines()
+        self.assertEqual(set(secrets), set(ignored))
+        self.assertEqual(before, source_tree(self.source))
+        archive = self.root / 'git.tar.gz'
+        self.assertEqual(before, archive_source(self.source, archive))
+        with tarfile.open(archive) as contents:
+            self.assertTrue(set(secrets).isdisjoint(contents.getnames()))
+            self.assertIn('.env.openrouter.example', contents.getnames())
 
     def test_generated_subtrees_are_not_traversed_with_or_without_manifest(self):
         (self.source / 'module/build').mkdir(parents=True)

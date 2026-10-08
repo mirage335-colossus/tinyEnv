@@ -1,0 +1,12 @@
+--- a/backends/web/renderer.mjs
++++ b/backends/web/renderer.mjs
+@@ -272,6 +272,9 @@
+       }
+     }
+     else if (widget.kind === 5) {
++      const framed = widget.textFrame !== false;
++      control.style.borderColor = framed ? "" : "transparent";
++      control.style.outline = node.style.outline = framed ? "" : "none";
+       // Set the native masking mode before assigning any text. A changed text
+       // policy requires a new shared generation and therefore a fresh control.
+       if (!widget.multiline) control.type = widget.masked ? "password" : "text";

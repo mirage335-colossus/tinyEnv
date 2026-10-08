@@ -109,6 +109,93 @@ conformance checks run against the selected adapters when host testing is enable
 The Rev supplier fixture also runs at scale 1.25 and maps its bitmap sample points
 from logical coordinates to actual physical pixels; expected colors do not change.
 
+## Nonvisual shortcut commands
+
+The trailing `Snapshot.commands` list declares `Command` identities independently
+of visible widgets. Each command has a `WidgetKey`, mutable `enabled` state and an
+optional exact current widget/group `scope`. Commands have no geometry, native
+object, paint, pointer target or tab-order entry. Existing snapshots default to an
+empty list and existing shortcuts can still target visible buttons.
+
+A shortcut may target either a current button or command. Commands accept only a
+sourced `Activate`: the retained adapter requires its source to equal the current
+focus, and shared normalization requires an available focusable source within the
+command's scope. Scope visibility, clipping, ancestors, active page and modal rules
+still apply. An unscoped command is unavailable during a modal presentation. A
+declared disabled shortcut is consumed before native editor undo or newline; its
+activation is ignored. Focus-scoped key bindings retain their existing semantics.
+
+Commands and widgets share one monotonic ID/generation registry. Removing and
+redeclaring an identity, changing between widget and command, or changing a
+command's scope requires a new generation. `enabled` can change without replacing
+the identity. Application code stamps widget scopes before command identities and
+shortcut targets. The [shared fixture](../gui/tests/nonvisual_command_test.cpp) and
+native/browser fixtures cover routing, lifetimes, source validation, modality and
+absence from rendering or native controls. A command's supplied source describes
+its semantic origin; it is not a claim that a physical key was pressed.
+
+## Text editors and obscured input
+
+The trailing `WidgetState::text_frame` defaults to `true`. A text control can set
+it to `false` to hide its rectangular normal and focused outlines while keeping
+the same control, padding, wrapping, native focus, selection, copy and scrolling.
+It is mutable visual state and needs no identity or generation change. The shared
+contract rejects `false` on nontext widgets. Existing text declarations keep their
+frames; terminal text keeps its existing frame-free rendering and focus marker.
+The browser accepts an absent serialized `textFrame` as `true`. Its transparent
+border and Rev's transparent border preserve the original border geometry. The
+[shared](../gui/tests/text_frame_test.cpp),
+[browser](../gui/tests/text_frame_web_test.mjs) and
+[native FLTK](../gui/tests/text_frame_fltk_test.cpp) fixtures cover frame changes
+without replacing text, selection or controls.
+
+`TextPolicy::masked` is a trailing, default-disabled declaration for single-line
+text fields. Existing four-field policy aggregates keep their behavior. Masked
+multiline, nontext and suggested controls are rejected by the shared contract.
+Application state and input events retain actual UTF-8 text and byte selections;
+shared display, caret, hit testing, selection and text measurements use one
+obscured glyph per Unicode codepoint.
+
+Terminal and framebuffer/SDL render the obscured projection. Browser fields enter
+native password mode before receiving a value, use obscured accessible names and
+measurements, and suppress copy/cut/drag export. FLTK uses native secret input for
+caret and selection, with shared policy handling edits and paste; it suppresses
+ordinary native undo and copy/cut/drag export. Clearing authoritative text therefore
+cannot restore a previous native secret through undo. Actual text remains in the
+application and native input buffers while needed for editing.
+
+Rev currently displays a disabled **Masked input unavailable** label for this
+capability and leaves other controls usable. It does not create a clear-text editor
+or display a masked field's value or placeholder. Applications using Rev must use
+another declared input path for secrets. The [masked fixtures](../gui/tests/masked_text_test.cpp)
+and backend fixtures exercise the public contract; the optional Rev native fixture
+still requires its supported toolchain and display qualification.
+
+FLTK text-editor scroll limits follow the native editor's actual wrapped rows.
+Long unbroken tokens can wrap differently from generic label measurement; repeated
+wheel input and unrelated snapshots retain the user's viewport without moving the
+caret. The [native wheel fixture](../gui/tests/text_scroll_fltk_test.cpp) checks both
+editable and readonly controls, start/end carets and actual lower bounds.
+
+Wheel input first scrolls the text or list under the pointer. When that control
+cannot move in the requested direction, the adapters try its logical ancestors
+until a scrollable group moves. Fitting readonly text blocks therefore remain
+selectable and copyable inside a scrolling group. The shared and browser paths
+follow the existing native FLTK/Rev ownership policy; the
+[shared](../gui/tests/wheel_chaining_test.cpp),
+[browser](../gui/tests/wheel_chaining_web_test.mjs) and
+[native](../gui/tests/wheel_chaining_fltk_test.cpp) fixtures cover fitting and
+clamped children, nested groups and retained text selection.
+
+An opted-in raw pointer surface owns its wheel event before ancestor scrolling.
+Its public `PointerInput::wheel_y` is positive upward, with absolute logical
+pointer coordinates. Inert labels can decorate a bitmap surface without blocking
+this input; interactive text controls retain their own selection and wheel policy.
+Applications must bound the number and total content of readonly blocks and bitmap
+surfaces: native controls keep their text buffers even when clipped, and generic
+scroll transactions can copy bitmap storage. These fixtures establish input
+behavior, not a rendering performance budget.
+
 ## Touch input and embedding a pixel display
 
 Physical pointer input has press, move, release and cancel phases. The first
@@ -125,6 +212,23 @@ adapters. They let declared raw surfaces receive gestures through inert labels
 and retain gesture ownership during a drag. The graphical editor's block-moving
 and wiring logic remains editor code; the entry-list example does not implement
 those features. Ordinary toolkit controls retain their native input handling.
+
+Secondary-click intent is a separate opt-in capability. `WidgetSpec.context_input`
+is appended with default `false`, and `PointerKind.context_menu` is appended
+without renumbering existing event values. Existing declarations retain their
+primary input and declared popup behavior. An opted-in top interactive surface
+receives one context event with absolute logical coordinates and pointer owner
+zero. Inert decorations are transparent; a live control blocks a surface behind
+it. Clipping, disabled/stale targets, modal prompts and active primary gestures
+still prevent invalid delivery.
+
+FLTK, Rev, shared framebuffer/SDL and browser adapters transport this generic
+intent; the workbench owns its file-action menu. Terminal hosts use keyboard
+and declared menus rather than physical secondary-pointer input. The retained
+[context patches](../gui/patches/README.md) cover the contract, shared interaction
+policy, native translation and browser serialization/isolated channel. These
+source extensions do not establish binary compatibility between independently
+built versions of the boundary.
 
 The SDL runner translates finger events into logical client coordinates. It
 filters synthetic mouse events from touch and retains one contact across a drag.
@@ -626,6 +730,38 @@ focus. Native focus feedback from main-window controls cannot replace that retai
 selection while a prompt is active, including when Windows reactivates a saved
 child during dialog teardown. Ordinary user focus resumes after completion. This
 generic adapter behavior also applies to the example's Change heading service.
+Native Escape uses the shared declared shortcut policy. The FLTK adapter handles
+both keydown and fallback shortcut events, consuming an unbound Escape instead
+of invoking the toolkit's implicit window close. A declared Escape action still
+runs; application-specific dialog cancellation belongs in the shared application.
+
+Shared key bindings can optionally name a current-generation focused control.
+Scoped bindings take precedence over global bindings for the same stroke, and
+shortcut activation reports its initiating control. The adapter supplies its
+actual retained focus; event senders cannot choose another control as the source.
+Z/Y keys use the same modifier and scope policy as Enter and function keys.
+Declared editor shortcuts consume the stroke even when the action is disabled,
+preventing native editing from turning a disabled send into a newline. Unbound
+strokes keep the editor's normal behavior.
+
+Group scrolling preserves unrelated bitmap storage and avoids work for unchanged
+or clamped offsets. FLTK synchronizes only changed control geometry and fonts,
+so scrolling one pane does not repeatedly lay out unrelated text editors.
+Nested clipping, modal visibility and transactional bitmap rollback remain part
+of the shared contract.
+
+Ordinary native FLTK presentation never requests native control focus. Retained
+focus changes remain pending until native FocusIn or an explicit foreground
+interaction; control retirement during a refresh does not restore child focus.
+This prevents presentation from requesting window activation or virtual desktop
+switches. Initial show and application close remain explicit host lifecycle
+actions. Completing a foreground native prompt is a separate interaction boundary
+that restores its visible parent after prompt teardown, even if the toolkit
+delays FocusIn. Completion after external focus loss or parent iconification
+leaves native focus unchanged; a successor prompt or popup opened by the reply
+keeps focus. Reply-created controls are materialized before restoration.
+Raw-pointer cancellation also releases the
+adapter's owned FLTK press routing; it never alters another window's grab.
 The editor's inline Open/New path fields instead belong to its own
 shared application layout. Editor-specific naming, examples and canvas hints do
 not alter the entry-list application's feature code.

@@ -331,6 +331,9 @@ both identity and archive operations. Its actual source bytes are retained under
 `third_party/retained/gui/`; recovery must not depend on an upstream URL surviving.
 A source archive includes `source.json`, complete per-file hashes and executable
 modes. Generated build outputs and ignored coordination files are excluded.
+Local `.env` and `.env.*` files and directories are also excluded at every
+depth, even without Git metadata; `.env.example` and `.env.*.example` templates
+remain source inputs. See [local credential handling](openrouter.md#git-and-source-archive-protection).
 Snapshot creation rechecks the input tree before publishing the archive.
 
 Release assembly verifies that each package's `source_tree_sha256`, normalized

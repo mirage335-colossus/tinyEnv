@@ -1,0 +1,62 @@
+--- backends/fltk/adapter.hpp
++++ backends/fltk/adapter.hpp
+@@ -37,6 +37,14 @@
+             }
+         }
+         int handle(int event) override {
++            // FocusOut precedes iconification on native window managers. Child
++            // focus changes inside this window do not revoke native ownership.
++            if(event==FL_FOCUS) {
++                owner_.native_unfocused_=false;
++                if(!owner_.service_)if(const auto key=owner_.focused();key)
++                    if(auto* native=owner_.native_widget(*key);native&&native->take_focus())return 1;
++            }
++            if(event==FL_HIDE||(event==FL_UNFOCUS&&!contains(Fl::focus())))owner_.native_unfocused_=true;
+             if(event==FL_HIDE||event==FL_UNFOCUS)owner_.cancel_pointer();
+             // FLTK also routes unhandled Escape as a shortcut; its default
+             // window handler would close the application on that path.
+@@ -285,7 +293,7 @@
+     std::optional<WidgetKey> popup_key_;
+     std::function<void(ServiceResult)> service_reply_;
+     std::optional<ServiceResult> completed_service_;
+-    bool started_=false,refreshing_=false;
++    bool started_=false,refreshing_=false,native_unfocused_=false;
+     struct PointerCapture {WidgetKey key;Point origin,last;};
+     std::optional<PointerCapture> pointer_capture_;
+     unsigned callback_depth_=0;
+@@ -520,7 +528,12 @@
+                 service_error_->copy_label(error.c_str());service_window_->redraw();return;
+             }
+         }
++        // An accepted/cancelled foreground prompt returns native ownership to
++        // its visible parent even if the toolkit defers the parent's FocusIn.
++        // A completion after external focus loss or iconification must not.
++        const bool restore_focus=window_->visible()&&service_window_->contains(Fl::focus());
+         completed_service_=std::move(result);service_window_->hide();
++        if(restore_focus)native_unfocused_=false;
+     }
+ public:
+     explicit Adapter(EventSink sink={}) : RetainedAdapter(std::move(sink),metrics),window_(std::make_unique<Window>(*this)) {
+@@ -663,9 +676,10 @@
+             page->button->color(color(tab->selected?palette.selection:palette.surface));page->button->labelcolor(color(palette.text));
+             window_->remove(page->button);window_->add(page->button);
+         }
+-        // A native prompt owns keyboard/clipboard focus until its completion.
+-        // Keep retained main-window focus current and restore it afterward.
+-        if(!service_) {
++        // Native focus restoration can activate or remap the top-level window.
++        // Keep background/minimized focus in the retained model until the window
++        // manager returns native focus, and leave active prompts in control.
++        if(!service_&&!native_unfocused_&&window_->visible()) {
+             if(const auto key=focused();key) {if(auto* native=native_widget(*key);native&&Fl::focus()!=native)native->take_focus();}
+             else if(Fl::focus()&&window_->contains(Fl::focus()))Fl::focus(nullptr);
+         }
+@@ -673,7 +687,7 @@
+     }
+     bool focus(std::optional<WidgetKey> key) override {
+         if(!RetainedAdapter::focus(key))return false;
+-        if(!service_) {
++        if(!service_&&!native_unfocused_&&window_->visible()) {
+             if(key) { if(auto* native=native_widget(*key))native->take_focus(); }
+             else if(Fl::focus()&&window_->contains(Fl::focus()))Fl::focus(nullptr);
+         }

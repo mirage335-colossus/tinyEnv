@@ -1,0 +1,17 @@
+--- a/include/gui/terminal.hpp
++++ b/include/gui/terminal.hpp
+@@ -329,12 +329,12 @@
+         const auto lines=editor_lines(widget);
+         for(std::size_t row=0;row<lines.size();++row) {
+             const auto& line=lines[row];const auto y=box.y+double(row)*height-offset.y;
+-            label({box.x-offset.x,y,box.width+offset.x,height},state.text.substr(line.begin,line.end-line.begin));
++            label({box.x-offset.x,y,box.width+offset.x,height},text_display(std::string_view(state.text).substr(line.begin,line.end-line.begin),widget.spec.text_policy));
+             if(focused()==widget.spec.key&&selection.anchor!=selection.caret) {
+                 const auto left=std::clamp(std::min(selection.anchor,selection.caret),line.begin,line.end);
+                 const auto right=std::clamp(std::max(selection.anchor,selection.caret),line.begin,line.end);
+                 const auto width=[&](std::size_t end) {
+-                    return measure_text({state.text.substr(line.begin,end-line.begin),state.font,coordinate_limit,
++                    return measure_text({text_display(std::string_view(state.text).substr(line.begin,end-line.begin),widget.spec.text_policy),state.font,coordinate_limit,
+                         snapshot().display_scale,TextWrap::none}).width;
+                 };
+                 const auto first=first_column(box.x-offset.x+width(left)),last=first_column(box.x-offset.x+width(right));

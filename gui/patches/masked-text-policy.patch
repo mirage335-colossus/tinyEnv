@@ -1,0 +1,47 @@
+--- a/include/gui/text.hpp
++++ b/include/gui/text.hpp
+@@ -31,9 +31,13 @@
+     bool multiline=false,read_only=false;
+     std::size_t max_bytes=1024*1024;
+     SubmitKey submit=SubmitKey::none;
++    // Obscure presentation and prevent native text export. The authoritative
++    // UTF-8 value and byte selection offsets remain unchanged. Single-line only.
++    bool masked=false;
+     bool operator==(const TextPolicy&) const = default;
+ };
+ inline std::string text_error(std::string_view text,const TextPolicy& policy) {
++    if(policy.masked&&policy.multiline)return "Masked text must use one line";
+     if(text.size()>policy.max_bytes)return "Text exceeds the byte limit";
+     if(!valid_utf8(text))return "Text must be UTF-8 without zero bytes";
+     if(!policy.multiline&&text.find_first_of("\r\n")!=std::string_view::npos)return "Text must use one line";
+@@ -43,6 +47,30 @@
+     offset=std::min(offset,text.size());
+     while(offset>0&&offset<text.size()&&(static_cast<unsigned char>(text[offset])&0xc0)==0x80)--offset;
+     return offset;
++}
++// Masked display uses one ASCII placeholder per Unicode codepoint. These
++// helpers accept the same valid UTF-8 as TextPolicy and retain source byte
++// offsets independently of the obscured display's byte offsets.
++inline std::size_t text_display_offset(std::string_view value,const TextPolicy& policy,std::size_t source_offset) {
++    source_offset=text_boundary(value,source_offset);
++    if(!policy.masked)return source_offset;
++    std::size_t count=0;
++    for(std::size_t at=0;at<source_offset;++count) {
++        ++at;while(at<source_offset&&(static_cast<unsigned char>(value[at])&0xc0)==0x80)++at;
++    }
++    return count;
++}
++inline std::size_t text_source_offset(std::string_view value,const TextPolicy& policy,std::size_t display_offset) {
++    if(!policy.masked)return text_boundary(value,display_offset);
++    std::size_t at=0;
++    while(display_offset&&at<value.size()) {
++        --display_offset;++at;
++        while(at<value.size()&&(static_cast<unsigned char>(value[at])&0xc0)==0x80)++at;
++    }
++    return at;
++}
++inline std::string text_display(std::string_view value,const TextPolicy& policy) {
++    return policy.masked?std::string(text_display_offset(value,policy,value.size()),'*'):std::string(value);
+ }
+ struct TextSelection {
+     std::size_t anchor=0,caret=0;

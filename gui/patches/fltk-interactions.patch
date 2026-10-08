@@ -1,0 +1,84 @@
+--- backends/fltk/adapter.hpp
++++ backends/fltk/adapter.hpp
+@@ -56,11 +56,16 @@
+                 if(Fl::event_key()==FL_Tab && !Fl::event_ctrl())return owner_.focus_next(Fl::event_shift()!=0)?1:0;
+                 std::optional<ShortcutKey> key;
+                 if(Fl::event_key()==FL_Escape)key=ShortcutKey::escape;
+-                else if(Fl::event_key()==FL_Enter)key=ShortcutKey::enter;
++                else if(Fl::event_key()==FL_Enter||Fl::event_key()==FL_KP_Enter)key=ShortcutKey::enter;
++                else if(Fl::event_key()=='z')key=ShortcutKey::z;
++                else if(Fl::event_key()=='y')key=ShortcutKey::y;
+                 else if(Fl::event_key()>FL_F && Fl::event_key()<=FL_F+12)
+                     key=static_cast<ShortcutKey>(int(ShortcutKey::f1)+Fl::event_key()-FL_F-1);
+                 bool consumed=false;
+-                if(key)owner_.safely([&]{consumed=owner_.policy().send(ShortcutEvent{*key,Fl::event_ctrl()!=0,Fl::event_shift()!=0,Fl::event_alt()!=0})==Delivery::delivered;});
++                if(key)owner_.safely([&]{
++                    const ShortcutEvent input{*key,Fl::event_ctrl()!=0,Fl::event_shift()!=0,Fl::event_alt()!=0,owner_.focused()};
++                    if(shortcut_binding(owner_.snapshot(),input)){owner_.policy().send(input);consumed=true;}
++                });
+                 if(consumed||Fl::event_key()==FL_Escape)return 1;
+             }
+             if(event==FL_PUSH && Fl::event_button()==FL_RIGHT_MOUSE) {
+@@ -204,10 +209,22 @@
+             if(event==FL_FOCUS&&!owner_.service_)owner_.RetainedAdapter::focus(key_);
+             const auto* widget=find_widget(owner_.snapshot(),key_);if(!widget)return 0;
+             const auto policy=widget->spec.text_policy;
+-            if(event==FL_KEYDOWN && Fl::event_key()==FL_Enter) {
++            if(event==FL_KEYDOWN) {
++                std::optional<ShortcutKey> shortcut;
++                if(Fl::event_key()==FL_Enter||Fl::event_key()==FL_KP_Enter)shortcut=ShortcutKey::enter;
++                else if(Fl::event_key()=='z')shortcut=ShortcutKey::z;
++                else if(Fl::event_key()=='y')shortcut=ShortcutKey::y;
+                 bool consumed=false;
+-                owner_.safely([&]{consumed=owner_.policy().enter(key_,Fl::event_ctrl()!=0,Fl::event_shift()!=0);});
+-                if(consumed||!policy.multiline)return 1;
++                if(shortcut)owner_.safely([&]{
++                    owner_.RetainedAdapter::focus(key_);
++                    const ShortcutEvent input{*shortcut,Fl::event_ctrl()!=0,Fl::event_shift()!=0,Fl::event_alt()!=0,key_};
++                    if(shortcut_binding(owner_.snapshot(),input)){owner_.policy().send(input);consumed=true;}
++                });
++                if(consumed)return 1;
++                if(shortcut==ShortcutKey::enter) {
++                    owner_.safely([&]{consumed=owner_.policy().enter(key_,Fl::event_ctrl()!=0,Fl::event_shift()!=0);});
++                    if(consumed||!policy.multiline)return 1;
++                }
+             }
+             const int result=policy.read_only?Fl_Text_Display::handle(event):Fl_Text_Editor::handle(event);
+             if((event==FL_KEYDOWN || event==FL_RELEASE || event==FL_PASTE)&&find_widget(owner_.snapshot(),key_))
+@@ -629,8 +646,9 @@
+             if(!entries_.contains(widget.spec.key.id))create(widget);
+             auto& entry=*entries_.at(widget.spec.key.id);auto& native=*entry.native;
+             const auto area=resolved_availability(entry.key);entry.clip->clip=area.clip;
+-            entry.clip->resize(int(area.bounds.x),int(area.bounds.y),int(area.bounds.width),int(area.bounds.height));
+-            native.resize(int(area.bounds.x),int(area.bounds.y),int(area.bounds.width),int(area.bounds.height));
++            const int x=int(area.bounds.x),y=int(area.bounds.y),w=int(area.bounds.width),h=int(area.bounds.height);
++            if(entry.clip->x()!=x||entry.clip->y()!=y||entry.clip->w()!=w||entry.clip->h()!=h)entry.clip->resize(x,y,w,h);
++            if(native.x()!=x||native.y()!=y||native.w()!=w||native.h()!=h)native.resize(x,y,w,h);
+             if(area.visible)entry.clip->show();else entry.clip->hide();
+             if(area.enabled)native.activate();else native.deactivate();
+             native.copy_tooltip(widget.state.help.c_str());native.labelsize(int(widget.state.font.size));
+@@ -648,7 +666,10 @@
+             case Kind::text: {
+                 auto& editor=static_cast<Editor&>(native);
+                 editor.wrapping(widget.spec.text_policy.multiline&&widget.state.wrap==TextWrap::word);
+-                editor.when(FL_WHEN_CHANGED);editor.textsize(int(widget.state.font.size));editor.textfont(widget.state.font.bold?FL_COURIER_BOLD:FL_COURIER);
++                editor.when(FL_WHEN_CHANGED);
++                if(editor.textsize()!=int(widget.state.font.size))editor.textsize(int(widget.state.font.size));
++                const auto font=widget.state.font.bold?FL_COURIER_BOLD:FL_COURIER;
++                if(editor.textfont()!=font)editor.textfont(font);
+                 editor.textcolor(color(area.enabled?tone_color(palette,widget.state.font.tone):palette.muted));editor.cursor_color(color(palette.accent));
+                 editor.show_cursor(!widget.spec.text_policy.read_only);
+                 if(widget.state.text!=editor.value()) {const auto selection=policy().text_selection(entry.key);editor.value(widget.state.text.c_str());editor.selection(selection);}
+@@ -749,7 +770,11 @@
+     void scroll(const WidgetKey& key,Point offset) override {
+         policy().require_interaction();
+         const auto* widget=find_widget(snapshot(),key);
+-        if(!widget||widget->spec.kind!=Kind::text) {RetainedAdapter::scroll(key,offset);sync_pending_=true;return;}
++        if(!widget||widget->spec.kind!=Kind::text) {
++            const auto before=RetainedAdapter::scroll_offset(key);RetainedAdapter::scroll(key,offset);
++            if(RetainedAdapter::scroll_offset(key)!=before)sync_pending_=true;
++            return;
++        }
+         if(!std::isfinite(offset.x)||!std::isfinite(offset.y))throw std::invalid_argument("Invalid native editor scroll offset");
+         pending_scroll_.insert_or_assign(key.id,PendingScroll{key,clamp_editor_scroll(*widget,offset)});
+     }

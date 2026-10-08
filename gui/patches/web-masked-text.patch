@@ -1,0 +1,11 @@
+--- a/include/gui/web.hpp
++++ b/include/gui/web.hpp
+@@ -189,7 +189,7 @@
+                 {"placeholder",v.placeholder},{"displayText",v.display_text},{"font",font(v.font)},{"wrap",v.wrap==TextWrap::word},{"checked",v.checked},
+                 {"selected",v.selected?Json{*v.selected}:Json{}},{"options",options(v.options)},{"actions",options(v.actions)},{"records",std::move(records)},
+                 {"rowHeight",s.row_height},{"activateOnSelect",s.activate_on_select},{"followTail",s.follow_tail},{"pointerInput",s.pointer_input},{"contextInput",s.context_input},
+-                {"multiline",s.text_policy.multiline},{"readOnly",s.text_policy.read_only},{"maxBytes",std::to_string(s.text_policy.max_bytes)},{"submit",int(s.text_policy.submit)},
++                {"multiline",s.text_policy.multiline},{"masked",s.text_policy.masked},{"readOnly",s.text_policy.read_only},{"maxBytes",std::to_string(s.text_policy.max_bytes)},{"submit",int(s.text_policy.submit)},
+                 {"contentSize",Json::Array{v.content_size.width,v.content_size.height}}};
+             if(s.kind==Kind::group||s.kind==Kind::list||s.kind==Kind::text){const auto offset=scroll_offset(s.key);out["scroll"]=Json::Array{offset.x,offset.y};
+                 const auto found=scroll_commands_.find({s.key.id,s.key.generation});out["scrollRevision"]=std::to_string(found==scroll_commands_.end()?0:found->second);}

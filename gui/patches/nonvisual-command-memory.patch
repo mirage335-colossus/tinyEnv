@@ -1,0 +1,31 @@
+--- include/gui/memory_adapter.hpp
++++ include/gui/memory_adapter.hpp
+@@ -27,6 +27,17 @@
+         require_mutable();
+         validate_snapshot(next);
+         auto generations=generations_;
++        // Commands and widgets share one monotonic lifetime registry.
++        for(const auto& command:next.commands) {
++            if(const auto* retained=find_command(snapshot_,command.key)) {
++                if(retained->scope!=command.scope)throw std::invalid_argument("Command scope changed without a new generation");
++            } else {
++                const auto previous=generations.find(command.key.id);
++                if(previous!=generations.end()&&command.key.generation<=previous->second)
++                    throw std::invalid_argument("Command generation was reused");
++            }
++            generations[command.key.id]=command.key.generation;
++        }
+         // Validate identities before preparing a replacement retained state.
+         for(const auto& w:next.widgets) {
+             const auto found=entries_.find(w.spec.key.id);
+@@ -237,6 +248,10 @@
+     Delivery send(Event event) {
+         require_thread();require_not_painting();if(closed_||dispatching_)return Delivery::ignored;
+         if(auto* shortcut=std::get_if<ShortcutEvent>(&event))shortcut->source=focus_;
++        if(const auto* widget=std::get_if<WidgetEvent>(&event);widget&&find_command(snapshot_,widget->target)) {
++            const auto* activate=std::get_if<Activate>(&widget->input);
++            if(!activate||!activate->source||activate->source!=focus_)return Delivery::ignored;
++        }
+         // One shared owner gate serves raw browser, SDL and embedded surfaces.
+         // Establish/reset before dispatch: a synchronous sink can replace state.
+         if(auto* widget=std::get_if<WidgetEvent>(&event))if(auto* pointer=std::get_if<PointerInput>(&widget->input)) {

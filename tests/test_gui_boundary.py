@@ -303,6 +303,7 @@ const CHAR: char = 'x';
     def test_header_mirror_uses_final_patch_bytes_and_preserves_incremental_outputs(self):
         inputs = (ROOT / 'cmake/GuiInputs.cmake').read_text()
         patcher = 'function(foundation_gui_patch' + inputs.split('function(foundation_gui_patch',1)[1].split('endfunction()',1)[0] + 'endfunction()\n'
+        repatcher = 'function(foundation_gui_repatch' + inputs.split('function(foundation_gui_repatch',1)[1].split('endfunction()',1)[0] + 'endfunction()\n'
         mirror = inputs.split('macro(foundation_gui_headers)', 1)[1].split('endmacro()', 1)[0]
         with tempfile.TemporaryDirectory(prefix='patched header mirror ') as temporary:
             root = Path(temporary); source = root / 'source'; source.mkdir()
@@ -311,21 +312,37 @@ const CHAR: char = 'x';
             (patches / 'apply.py').write_bytes((ROOT / 'gui/patches/apply.py').read_bytes())
             names = [('contract','touch-contract'),('memory_adapter','touch-memory'),
                      ('interaction','touch-interaction'),('runtime','file-services'),
-                     ('terminal','terminal-caret'),('web','web-tick')]
+                     ('terminal','terminal-caret'),('web','web-tick'),('bitmap','bitmap-copy'),
+                     ('text','masked-text-policy'),('framebuffer','masked-text-framebuffer'),
+                     ('presentation','masked-text-presentation')]
             for name, patch in names:
                 old = 'inline constexpr int ' + name + '_value=1;\n'
                 new = old.replace('=1;', '=2;')
                 (upstream / (name+'.hpp')).write_text(old)
                 (patches / (patch+'.patch')).write_text('--- old\n+++ new\n@@ -1 +1 @@\n-'+old+'+'+new)
+            stages = [('contract','context-contract',2),('contract','shortcut-contract',3),
+                      ('contract','availability-path',4),('contract','masked-text-contract',5),
+                      ('contract','nonvisual-command-contract',6),
+                      ('contract','text-frame-contract',7),('framebuffer','text-frame-framebuffer',2),
+                      ('interaction','context-interaction',2),
+                      ('interaction','shortcut-interaction',3),('interaction','masked-text-interaction',4),
+                      ('interaction','wheel-chaining-interaction',5),
+                      ('memory_adapter','shortcut-memory',2),('memory_adapter','nonvisual-command-memory',3),('terminal','terminal-shortcuts',2),
+                      ('terminal','masked-text-terminal',3)]
+            for name, patch, value in stages:
+                old = 'inline constexpr int ' + name + '_value=' + str(value) + ';\n'
+                new = old.replace('='+str(value)+';', '='+str(value+1)+';')
+                (patches / (patch+'.patch')).write_text('--- old\n+++ new\n@@ -1 +1 @@\n-'+old+'+'+new)
+            final_values = {'contract':8,'interaction':6,'memory_adapter':4,'terminal':4,'framebuffer':3}
             (upstream / 'removed.hpp').write_text('inline constexpr int obsolete=1;\n')
             (upstream / 'other.hpp').write_text(''.join('#include "'+name+'.hpp"\n' for name,_ in names))
             (source / 'main.cpp').write_text('#include <gui/other.hpp>\n' +
-                ''.join('static_assert('+name+'_value==2);\n' for name,_ in names)+'int main(){return 0;}\n')
+                ''.join('static_assert('+name+'_value=='+str(final_values.get(name,2))+');\n' for name,_ in names)+'int main(){return 0;}\n')
             project = 'cmake_minimum_required(VERSION 3.24)\nproject(HeaderMirror LANGUAGES CXX)\nfind_package(Python3 REQUIRED COMPONENTS Interpreter)\n'
             project += 'set(FOUNDATION_GUI_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/upstream")\n'
             project += 'set(foundation_gui_module_root "${CMAKE_CURRENT_SOURCE_DIR}")\n'
             project += 'file(GLOB verified_files "${FOUNDATION_GUI_SOURCE}/include/gui/*")\n'
-            project += patcher + mirror + 'foundation_gui_patch(include/gui/web.hpp web-tick.patch include/gui/web.hpp)\n'
+            project += patcher + repatcher + mirror + 'foundation_gui_patch(include/gui/web.hpp web-tick.patch include/gui/web.hpp)\n'
             project += 'add_executable(mirror main.cpp)\ntarget_compile_features(mirror PRIVATE cxx_std_20)\n'
             project += 'target_include_directories(mirror PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/include" "${FOUNDATION_GUI_SOURCE}/include")\n'
             (source / 'CMakeLists.txt').write_text(project)
@@ -334,6 +351,9 @@ const CHAR: char = 'x';
             compile = ['cmake','--build',str(build)]
             for command in (configure,compile):
                 subprocess.run(command,check=True,capture_output=True,text=True,timeout=45)
+            for name in ('contract', 'interaction'):
+                self.assertIn(name+'_value='+str(final_values[name]), (build/'include/gui'/(name+'.hpp')).read_text())
+                self.assertIn(name+'_value=2', (build/'patch-inputs'/(name+'-touch.hpp')).read_text())
             outputs = list((build/'include/gui').glob('*.hpp')) + list((build/'CMakeFiles/mirror.dir').rglob('*.o')) + list((build/'CMakeFiles/mirror.dir').rglob('*.obj'))
             self.assertGreater(len(outputs),5)
             before = {path: (path.read_bytes(),path.stat().st_mtime_ns) for path in outputs}
@@ -606,6 +626,9 @@ endfunction()
             project = """cmake_minimum_required(VERSION 3.24)
 project(RevDependencySelection LANGUAGES NONE)
 set(FOUNDATION_GUI_REV ON)
+function(foundation_gui_repatch source patch output)
+    foundation_gui_patch("${source}" "${patch}" "${output}")
+endfunction()
 function(foundation_gui_patch source patch output)
     if(output STREQUAL "Rev.cmake")
         file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/Rev.cmake" [=[

@@ -1,0 +1,28 @@
+--- backends/fltk/adapter.hpp
++++ backends/fltk/adapter.hpp
+@@ -51,6 +51,9 @@
+                 if(consumed||Fl::event_key()==FL_Escape)return 1;
+             }
+             if(event==FL_PUSH && Fl::event_button()==FL_RIGHT_MOUSE) {
++                bool context=false;
++                owner_.safely([&]{context=owner_.context_event({double(Fl::event_x()),double(Fl::event_y())});});
++                if(context)return 1;
+                 const auto order=paint_order(owner_.snapshot());
+                 for(auto it=order.rbegin();it!=order.rend();++it) {
+                     const auto a=owner_.resolved_availability(*it);
+@@ -310,6 +313,15 @@
+         try {operation();}catch(const std::exception& e){error_=e.what();}
+     }
+     void dispatch(Event event) {safely([&]{policy().send(std::move(event));});}
++    bool context_event(Point position) {
++        if(service_||popup_||pointer_capture_)return true; // Modal input and primary gestures own input.
++        const auto target=context_target(snapshot(),position,[&](const WidgetKey& key){return scroll_offset(key);});
++        if(!target||!find_widget(snapshot(),*target)->spec.context_input)return false;
++        focus(*target);
++        policy().send(WidgetEvent{*target,PointerInput{PointerKind::context_menu,position,0,0,
++            Fl::event_ctrl()!=0,Fl::event_shift()!=0,Fl::event_alt()!=0}});
++        return true;
++    }
+     void cancel_pointer() {
+         if(!pointer_capture_)return;
+         const auto capture=*pointer_capture_;pointer_capture_.reset();

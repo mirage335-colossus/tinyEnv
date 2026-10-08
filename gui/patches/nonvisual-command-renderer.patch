@@ -1,0 +1,26 @@
+--- a/backends/web/renderer.mjs
++++ b/backends/web/renderer.mjs
+@@ -24,11 +24,12 @@
+     for(const kind of ["blur","pagehide"])this.listen(this.document.defaultView,kind,()=>this.cancelPointers());
+     this.listen(this.root,"wheel", event => this.groupWheel(event), {passive: false});
+     this.listen(this.document,"keydown", event => {
+-      if (event.defaultPrevented || event.isComposing || !this.snapshot) return;
+-      if(event.key==="Escape"&&this.snapshot.popup){event.preventDefault();this.operation({key:this.snapshot.popup.key},"popupClose");return;}
++      const snapshot = this.acceptedSnapshot || this.snapshot;
++      if (event.defaultPrevented || event.isComposing || !snapshot) return;
++      if(event.key==="Escape"&&snapshot.popup){event.preventDefault();this.operation({key:snapshot.popup.key},"popupClose");return;}
+       const code = ["Escape","Enter","F1","F2","F3","F4","F5","F6","F7","F8","F9","F10","F11","F12","z","y"].indexOf(event.key.length===1?event.key.toLowerCase():event.key);
+       const source=[...this.nodes.values()].find(entry=>entry.control===this.document.activeElement)?.widget.key;
+-      if (this.snapshot.keyBindings.some(binding => binding.key === code && binding.control === event.ctrlKey && binding.shift === event.shiftKey && binding.alt === event.altKey && (!binding.focus || identity(binding.focus) === identity(source || {})))) {
++      if (snapshot.keyBindings.some(binding => binding.key === code && binding.control === event.ctrlKey && binding.shift === event.shiftKey && binding.alt === event.altKey && (!binding.focus || identity(binding.focus) === identity(source || {})))) {
+         event.preventDefault(); this.send({type:"shortcut",key:code,control:event.ctrlKey,shift:event.shiftKey,alt:event.altKey}).catch(()=>{});
+       }
+     }, {capture:true});
+@@ -122,6 +123,7 @@
+         if (!entry.updating) act("scroll", {x: entry.control.scrollLeft, y: entry.control.scrollTop}, `scroll:${identity(entry.widget.key)}`);
+       });
+       entry.control.addEventListener("keydown", event => {
++        if (event.defaultPrevented) return;
+         const value={ArrowDown:"down",ArrowUp:"up",Enter:"enter"," ":"space"}[event.key];
+         if(value){event.preventDefault();act("listKey",{value});}
+       });

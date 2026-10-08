@@ -1,0 +1,33 @@
+--- include/gui/interaction.hpp
++++ include/gui/interaction.hpp
+@@ -9,7 +9,7 @@
+ namespace gui {
+ // Host-independent physical input used by the software-rendered profiles.
+ // Native widget toolkits may supply semantic events directly instead.
+-enum class Key { tab,enter,space,escape,left,right,up,down,home,end,backspace,delete_key,page_up,page_down,select_all,menu,next_page,previous_page,quit,f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12 };
++enum class Key { tab,enter,space,escape,left,right,up,down,home,end,backspace,delete_key,page_up,page_down,select_all,menu,next_page,previous_page,quit,f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,z,y };
+ namespace interaction_detail {
+ inline std::size_t next(std::string_view value,std::size_t at) {
+     if(at>=value.size())return value.size();
+@@ -167,8 +167,10 @@
+             }
+             return;
+         }
+-        if(const auto shortcut=shortcut_key(input);shortcut&&
+-            policy().send(ShortcutEvent{*shortcut,control,shift,alt})==Delivery::delivered)return;
++        if(const auto shortcut=shortcut_key(input);shortcut) {
++            const ShortcutEvent event{*shortcut,control,shift,alt,focused()};
++            if(shortcut_binding(snapshot(),event)){policy().send(event);return;}
++        }
+         if(input==Key::next_page||input==Key::previous_page) {change_page(input==Key::previous_page?-1:1);return;}
+         if(input==Key::tab&&control) {change_page(shift?-1:1);return;}
+         if(input==Key::tab) {focus_next(shift);return;}
+@@ -514,6 +516,8 @@
+     static std::optional<ShortcutKey> shortcut_key(Key key) {
+         if(key==Key::escape)return ShortcutKey::escape;
+         if(key==Key::enter)return ShortcutKey::enter;
++        if(key==Key::z)return ShortcutKey::z;
++        if(key==Key::y)return ShortcutKey::y;
+         if(key>=Key::f1&&key<=Key::f12)return static_cast<ShortcutKey>(static_cast<int>(ShortcutKey::f1)+static_cast<int>(key)-static_cast<int>(Key::f1));
+         return {};
+     }

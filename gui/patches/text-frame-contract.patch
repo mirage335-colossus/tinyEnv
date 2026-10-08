@@ -1,0 +1,19 @@
+--- include/gui/contract.hpp
++++ include/gui/contract.hpp
+@@ -110,6 +110,8 @@
+     // A group's content_clip determines viewport size; padding is not content.
+     Size content_size;
+     BitmapView bitmap;
++    // Text-only appearance; disabling the frame preserves native input and geometry.
++    bool text_frame=true;
+ };
+ struct Widget { WidgetSpec spec;WidgetState state; };
+ struct Page {
+@@ -323,6 +325,7 @@
+         if(v.content_clip)require(s.kind==Kind::group&&valid_rect(*v.content_clip),"Invalid group content clip");
+         for(const auto* value:{&v.label,&v.text,&v.help,&v.accessible_name,&v.placeholder,&v.display_text})text(*value);
+         require(std::isfinite(s.row_height)&&s.row_height>0&&s.row_height<=coordinate_limit,"Invalid row height");
++        require(v.text_frame||s.kind==Kind::text,"Text frame disabled on unsupported widget");
+         require(!s.text_policy.masked||s.kind==Kind::text,"Masking on unsupported widget");
+         require(!s.text_policy.masked||v.options.empty(),"Masked editors cannot suggest text");
+         if(s.kind==Kind::text)require(text_error(v.text,s.text_policy).empty(),"Invalid editor state");

@@ -1,0 +1,44 @@
+--- include/gui/memory_adapter.hpp
++++ include/gui/memory_adapter.hpp
+@@ -124,7 +124,33 @@
+         if(!std::isfinite(offset.x)||!std::isfinite(offset.y))throw std::invalid_argument("Invalid scroll offset");
+         const auto maximum=scroll_maximum(*w);
+         offset={std::clamp(offset.x,0.0,maximum.x),std::clamp(offset.y,0.0,maximum.y)};
++        if(offset==entry.offset)return;
+         if(w->spec.kind==Kind::group) {
++            bool has_bitmap_descendant=false;
++            for(const auto& candidate:snapshot_.widgets)if(candidate.spec.kind==Kind::bitmap) {
++                const auto* current=&candidate;
++                for(std::size_t depth=0;current&&!current->spec.parent.empty()&&depth<snapshot_.widgets.size();++depth) {
++                    if(current->spec.parent==key.id){has_bitmap_descendant=true;break;}
++                    const auto parent=current->spec.parent;current=nullptr;
++                    for(const auto& item:snapshot_.widgets)if(item.spec.key.id==parent){current=&item;break;}
++                }
++                if(has_bitmap_descendant)break;
++            }
++            if(!has_bitmap_descendant) {
++                // Unrelated pixel grids keep their physical storage. Validate
++                // modal visibility before committing the inexpensive state change.
++                const auto before=entry.offset;auto focus=focus_;std::vector<Entry*> retire_popups;
++                entry.offset=offset;
++                try {
++                    require_modal_visible(snapshot_,entries_);
++                    if(focus) {const auto area=resolve_availability(snapshot_,entries_,*focus);if(!area.visible||!area.enabled)focus.reset();}
++                    for(auto& [id,current]:entries_)if(current.popup) {
++                        (void)id;const auto area=resolve_availability(snapshot_,entries_,current.spec.key);
++                        if(!area.visible||!area.enabled)retire_popups.push_back(&current);
++                    }
++                } catch(...) {entry.offset=before;throw;}
++                focus_=std::move(focus);for(auto* current:retire_popups)current->popup.reset();return;
++            }
+             // Fractional movement can change endpoint-snapped bitmap extents.
+             // Prepare grids and interaction state before committing the scroll.
+             auto entries=entries_;entries.at(key.id).offset=offset;
+@@ -210,6 +236,7 @@
+     // Entry point used by a native callback after translating its input.
+     Delivery send(Event event) {
+         require_thread();require_not_painting();if(closed_||dispatching_)return Delivery::ignored;
++        if(auto* shortcut=std::get_if<ShortcutEvent>(&event))shortcut->source=focus_;
+         // One shared owner gate serves raw browser, SDL and embedded surfaces.
+         // Establish/reset before dispatch: a synchronous sink can replace state.
+         if(auto* widget=std::get_if<WidgetEvent>(&event))if(auto* pointer=std::get_if<PointerInput>(&widget->input)) {

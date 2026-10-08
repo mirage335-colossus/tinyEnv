@@ -21,7 +21,41 @@ assert.throws(()=>validateRendererOperation({type:'measure',values:[{id:'99',wid
 assert.throws(()=>validateRendererOperation({type:'editIntent',key:{...key,generation:'2'},value:'new'},snapshot('old')),error=>error.stale);
 assert.doesNotThrow(()=>validateRendererOperation({type:'selection',key,anchor:'0',caret:'1'},{...snapshot('old'),widgets:[{...widget,readOnly:true}]}));
 assert.doesNotThrow(()=>validateRendererOperation({type:'pointer',key,kind:'press',pointerId:'1',x:0,y:0,wheelX:0,wheelY:0,control:false,shift:false,alt:false},{...snapshot('old'),widgets:[{...widget,pointerInput:true}]}));
+const context={type:'pointer',key,kind:'context',pointerId:'0',x:20,y:10,wheelX:0,wheelY:0,control:false,shift:false,alt:false};
+const contextSnapshot={...snapshot('old'),widgets:[{...widget,contextInput:true,pointerInput:false}]};
+assert.doesNotThrow(()=>validateRendererOperation(context,contextSnapshot));
+assert.throws(()=>validateRendererOperation(context,snapshot('old')),error=>error.stale);
+assert.throws(()=>validateRendererOperation(context,{...snapshot('old'),widgets:[{...widget,pointerInput:true}]}),error=>error.stale);
+for(const values of [{pointerId:'1'},{wheelX:1},{wheelY:-1}])
+  assert.throws(()=>validateRendererOperation({...context,...values},contextSnapshot),/pointer/);
+for(const values of [{visible:false},{enabled:false},{inModal:false},{key:{...key,generation:'2'}}])
+  assert.throws(()=>validateRendererOperation(context,{...contextSnapshot,widgets:[{...contextSnapshot.widgets[0],...values}]}),error=>error.stale);
+assert.throws(()=>validateRendererOperation({...context,kind:'press',pointerId:'1'},contextSnapshot),error=>error.stale);
+assert.throws(()=>validateRendererOperation(context,{...contextSnapshot,popup:{key}}),error=>error.stale);
 assert.deepEqual(publicSnapshot({...snapshot('old'),service:{token:'secret'},epoch:'secret',ack:'4'}),snapshot('old'));
+for(const appearance of [{},{textFrame:true},{textFrame:false}]) {
+  const view={...snapshot('old'),widgets:[{...widget,...appearance}]};
+  assert.deepEqual(publicSnapshot(view),view,'text framing must cross the public widget records without changing the default');
+  assert.throws(()=>validateRendererOperation({type:'editIntent',key,value:'new',textFrame:false},view),/shape/,
+    'renderer input must not forge an authoritative appearance change');
+}
+const commandKey={id:'command.undo',generation:'9007199254740993'};
+const command={key:commandKey,enabled:false,scope:key};
+const shortcut=(code=14,shift=false)=>({type:'shortcut',key:code,control:true,shift,alt:false});
+const commandSnapshot={...snapshot('old'),commands:[command],keyBindings:[
+  {key:14,target:commandKey,control:true,shift:false,alt:false,focus:key},
+  {key:14,target:commandKey,control:true,shift:true,alt:false,focus:key},
+  {key:15,target:commandKey,control:true,shift:false,alt:false,focus:key}]};
+assert.deepEqual(publicSnapshot({...commandSnapshot,service:{token:'secret'},epoch:'secret',ack:'4'}),commandSnapshot,
+  'command metadata must cross the isolated channel without host-private state or numeric generation conversion');
+for(const operation of [shortcut(),shortcut(14,true),shortcut(15)])
+  assert.doesNotThrow(()=>validateRendererOperation(operation,commandSnapshot),'declared Ctrl+Z/Shift+Z/Y must remain delegated when disabled');
+assert.throws(()=>validateRendererOperation(shortcut(16),commandSnapshot),/shortcut/);
+assert.throws(()=>validateRendererOperation({...shortcut(),source:key},commandSnapshot),/shape/);
+assert.throws(()=>validateRendererOperation({...shortcut(),target:commandKey},commandSnapshot),/shape/);
+assert.throws(()=>validateRendererOperation({type:'activate',key:commandKey},commandSnapshot),error=>error.stale,
+  'a command identity must not gain a direct widget capability');
+assert.throws(()=>validateRendererOperation(shortcut(),{...commandSnapshot,keyBindings:[]}),error=>error.stale);
 // A queued check runs only at first preparation and has no sequence side effect.
 {
   let current=true,checks=0;const sent=[];
@@ -53,6 +87,46 @@ assert.deepEqual(publicSnapshot({...snapshot('old'),service:{token:'secret'},epo
   await assert.rejects(renderer.send({type:'editIntent',key:{...key,generation:'2'},value:'stale'}),/available/);
   assert.equal(sent.length,1);assert.equal(failures.length,0);
   client.state=state(2,'authoritative');hostChannel.accept(client.state);await flush();
+  hostChannel.close();renderer.close();client.close();assert.equal(scheduler.timers.size,0);
+}
+// DOM focus reaches the host asynchronously. A following scoped command must
+// queue behind that focus acknowledgment rather than reject against old focus.
+{
+  const secondKey={id:'second',generation:'1'};
+  const view={...commandSnapshot,commands:[{...command,enabled:true,scope:secondKey}],
+    widgets:[widget,{...widget,key:secondKey}],focus:key,
+    keyBindings:[{...commandSnapshot.keyBindings[0],focus:secondKey}]};
+  const current=(ack,focus=key)=>({...state(ack),snapshot:{...view,focus}});
+  const ports=new MessageChannel(),scheduler=sched(),sent=[],accepted=[],failures=[];let finishFocus,hostChannel;
+  const client=new Client(envelope=>{
+    sent.push(envelope);
+    if(envelope.operation.type==='focus')return new Promise(resolve=>{finishFocus=()=>resolve(current(envelope.seq,secondKey));});
+    assert.deepEqual(client.state.snapshot.focus,secondKey,'command preparation must follow the preceding focus acknowledgment');
+    return Promise.resolve(current(envelope.seq,secondKey));
+  },value=>hostChannel?.accept(value));
+  client.accept(current(0));
+  hostChannel=createHostChannel({port:ports.port1,generation,client,scheduler,onBound:()=>hostChannel.accept(client.state),onFailure:error=>failures.push(error)});
+  const renderer=createRendererRequests({port:ports.port2,generation,acceptSnapshot:value=>accepted.push(value),present(){},onFailure:error=>failures.push(error)});
+  await flush();
+  const focus=renderer.send({type:'focus',key:secondKey});await flush();
+  const activation=renderer.send(shortcut());await flush();
+  assert.equal(sent.length,1);assert.deepEqual(client.state.snapshot.focus,key);
+  finishFocus();await Promise.all([focus,activation]);
+  assert.equal(sent.length,2);assert.deepEqual(sent[1].operation,shortcut());
+  assert.deepEqual(accepted.at(-1).commands,view.commands);assert.equal(failures.length,0);
+  hostChannel.close();renderer.close();client.close();assert.equal(scheduler.timers.size,0);
+}
+// A queued declaration replaced before dispatch is rejected without an exchange
+// or sequence increment, while its initial receipt still had a valid stroke.
+{
+  const ports=new MessageChannel(),scheduler=sched(),sent=[],failures=[];let hostChannel;
+  const client=new Client(async envelope=>{sent.push(envelope);return state(envelope.seq);},value=>hostChannel?.accept(value));
+  client.accept({...state(0),snapshot:commandSnapshot});client.failed=true;
+  hostChannel=createHostChannel({port:ports.port1,generation,client,scheduler,onBound:()=>hostChannel.accept(client.state),onFailure:error=>failures.push(error)});
+  const renderer=createRendererRequests({port:ports.port2,generation,acceptSnapshot(){},present(){},onFailure:error=>failures.push(error)});
+  await flush();const activation=renderer.send(shortcut()).catch(error=>error);await flush();
+  client.state={...client.state,snapshot:{...commandSnapshot,commands:[],keyBindings:[]}};client.retry();
+  assert.match((await activation).message,/Shortcut is no longer available/);assert.equal(sent.length,0);assert.equal(client.ack,0n);assert.equal(failures.length,0);
   hostChannel.close();renderer.close();client.close();assert.equal(scheduler.timers.size,0);
 }
 // A host dialog can finish while its ordered completion is still in flight.

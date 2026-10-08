@@ -8,3 +8,20 @@ __pycache__/
 /third_party/cache/
 .DS_Store
 /:memory:.ses
+
+# Local credentials and their backups; only empty examples belong in source.
+.env
+.env.*
+!.env.example
+!.env.*.example
+# Common editor backup, autosave, lock and swap names for environment files.
+.env~
+.#.env
+.#.env.*
+\#.env\#
+\#.env.*\#
+..env.sw[a-z]
+..env.*.sw[a-z]
+
+# Per-chat UI state and private workbench job payloads stay local.
+.tinyenv/
