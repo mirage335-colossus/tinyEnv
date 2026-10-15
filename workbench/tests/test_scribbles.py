@@ -3,9 +3,12 @@
 import hashlib
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
+from unittest.mock import patch
 import unittest
 from datetime import date
 
@@ -14,13 +17,16 @@ from workbench.services.providers import ProviderClient, ProviderConfig
 
 
 class FakeProvider:
-    def __init__(self, response=None, provider="local", model="fixture-small"):
+    def __init__(self, response=None, provider="local", model="fixture-small", fail_after=None):
         self.config = SimpleNamespace(provider=provider, model=model, network_enabled=False)
         self.calls = []
+        self.fail_after = fail_after
         self.response = response if response is not None else semantic_response()
 
     def complete(self, messages, *, purpose, sources):
         self.calls.append((messages, purpose, sources))
+        if self.fail_after is not None and len(self.calls) > self.fail_after:
+            raise RuntimeError("synthetic interruption")
         return {"text": self.response, "provider": self.config.provider,
                 "model": self.config.model, "usage": {"prompt_tokens": 12, "completion_tokens": 5}}
 
@@ -48,8 +54,22 @@ class ScribblesTests(unittest.TestCase):
         path.write_bytes(text.encode("utf-8") if isinstance(text, str) else text)
         return path
 
-    def build(self, paths=None, config=None, provider=None, name="generated"):
-        return ScribbleBuilder(config, provider).build(paths or [self.selected], self.root / name)
+    def build(self, paths=None, config=None, provider=None, name="generated", **options):
+        return ScribbleBuilder(config, provider).build(paths or [self.selected], self.root / name, **options)
+
+    def checkpoint(self, name="generated"):
+        digest = hashlib.sha256(str(self.root / name).encode()).hexdigest()[:32]
+        return self.root / (".tinyenv-scribble-" + digest + ".checkpoint")
+
+    def interrupted(self, name="generated", context=None):
+        if not (self.selected / "resume.txt").exists():
+            self.source("resume.txt", "Memory allocation source integrity. " * 20)
+        config = ScribbleConfig(ai_enabled=True, chunk_bytes=128)
+        provider = FakeProvider(fail_after=1)
+        with self.assertRaisesRegex(ScribbleError, "no retry"):
+            self.build(config=config, provider=provider, name=name, checkpoint_context=context)
+        self.assertFalse((self.root / name).exists())
+        return config, provider
 
     def test_local_snapshot_is_exact_utf8_bounded_and_has_truthful_line_anchors(self):
         original = "Header\r\n" + "α🙂MemoryAllocation " * 45 + "\n\nlast line"
@@ -190,7 +210,7 @@ class ScribblesTests(unittest.TestCase):
         self.assertFalse((self.root / "generated").exists())
         provider = FakeProvider(response="x" * 50)
         with self.assertRaises(ScribbleError):
-            self.build(config=ScribbleConfig(ai_enabled=True, max_response_chars=32), provider=provider)
+            self.build(config=ScribbleConfig(ai_enabled=True, max_response_chars=32), provider=provider, name="oversized")
         self.assertFalse((self.root / "generated").exists())
 
     def test_actual_provider_safe_error_is_preserved_without_credentials_or_retry(self):
@@ -210,7 +230,7 @@ class ScribblesTests(unittest.TestCase):
         def arbitrary_failure(messages, *, purpose, sources):
             raise RuntimeError("private-secret-marker")
         with self.assertRaises(ScribbleError) as failure:
-            self.build(config=ScribbleConfig(ai_enabled=True), provider=arbitrary_failure)
+            self.build(config=ScribbleConfig(ai_enabled=True), provider=arbitrary_failure, name="arbitrary-failure")
         self.assertNotIn("private-secret-marker", str(failure.exception))
         self.assertIn("no retry", str(failure.exception))
 
@@ -413,7 +433,7 @@ class ScribblesTests(unittest.TestCase):
             annotation[field] = value
             provider = FakeProvider(response=json.dumps(annotation))
             with self.subTest(field=field), self.assertRaises(ScribbleError) as failure:
-                self.build(config=ScribbleConfig(ai_enabled=True), provider=provider)
+                self.build(config=ScribbleConfig(ai_enabled=True), provider=provider, name="invalid-" + field)
             diagnostic = str(failure.exception)
             self.assertIn("field '" + field + "'", diagnostic)
             self.assertIn(reason, diagnostic)
@@ -437,7 +457,7 @@ class ScribblesTests(unittest.TestCase):
         provider = FakeProvider(response="bad\ud800")
         with self.assertRaises(ScribbleError):
             self.build(config=ScribbleConfig(ai_enabled=True), provider=provider)
-        result = self.build()
+        result = self.build(name="valid-unicode")
         evaluator = FakeProvider()
         with self.assertRaises(ScribbleError):
             ScribbleBuilder().evaluate(result, ["valid", "bad\ud800"], callback=evaluator)
@@ -449,6 +469,306 @@ class ScribblesTests(unittest.TestCase):
         result = self.build(config=ScribbleConfig(max_directory_depth=1))
         self.assertEqual([item["path"] for item in result.index["sources"]], [str(good)])
         self.assertIn("directory_depth_limit", {item["reason"] for item in result.evidence["skipped"]})
+
+    @unittest.skipUnless(ScribbleBuilder.checkpoint_supported(), "durable checkpoints need qualified POSIX operations")
+    def test_explicit_resume_reuses_durable_annotations_and_exact_provenance(self):
+        context = {"version": 1, "binding_sha256": "fixture-binding", "context": "retained research"}
+        config, first = self.interrupted(context=context)
+        checkpoint = self.checkpoint()
+        first_record = json.loads((checkpoint / "chunk-0000.json").read_text())["value"]["record"]
+        new = FakeProvider()
+        with self.assertRaises(ScribbleError):
+            self.build(config=config, provider=new, checkpoint_context=context)
+        self.assertEqual(new.calls, [])
+        builder = ScribbleBuilder(config, new)
+        restored = builder.checkpoint_context(self.root / "generated")
+        self.assertEqual(restored, context)
+        restored["context"] = "caller mutation"
+        self.assertEqual(builder.checkpoint_context(self.root / "generated"), context)
+        progress = []
+        result = self.build(config=config, provider=new, resume=True, checkpoint_context=context,
+                            on_progress=lambda value: progress.append(value))
+        self.assertEqual(len(new.calls), len(result.index["chunks"]) - 1)
+        self.assertEqual(result.evidence["ai_calls"], len(result.index["chunks"]))
+        self.assertEqual(result.evidence["provider_calls"][0], first_record)
+        self.assertEqual("".join(chunk["content"] for chunk in result.index["chunks"]),
+                         (self.selected / "resume.txt").read_text())
+        self.assertTrue(any(item["resumed_chunks"] == 1 for item in progress))
+        self.assertEqual(progress[-1]["phase"], "completed")
+        self.assertTrue(all(set(item) == {"phase", "completed_chunks", "total_chunks", "resumed_chunks"}
+                            for item in progress))
+        self.assertEqual(ScribbleBuilder().load(result.index_path.parent).index, result.index)
+
+    @unittest.skipUnless(ScribbleBuilder.checkpoint_supported(), "durable checkpoints need qualified POSIX operations")
+    def test_resume_rejects_changed_source_bytes_identity_selection_and_missing_input(self):
+        for mutation in ("bytes", "identity", "missing", "selection"):
+            name = "stale-" + mutation
+            config, _ = self.interrupted(name=name)
+            source = self.selected / "resume.txt"
+            original = source.read_bytes()
+            if mutation == "bytes":
+                source.write_bytes(original + b"changed")
+            elif mutation == "identity":
+                before = source.stat()
+                replacement = source.with_name("resume-replacement.txt")
+                replacement.write_bytes(original)
+                created = replacement.stat()
+                self.assertEqual((source.stat().st_dev, source.stat().st_ino), (before.st_dev, before.st_ino))
+                self.assertNotEqual((created.st_dev, created.st_ino), (before.st_dev, before.st_ino))
+                os.replace(replacement, source)
+                self.assertEqual(source.read_bytes(), original)
+                self.assertEqual((source.stat().st_dev, source.stat().st_ino), (created.st_dev, created.st_ino))
+            elif mutation == "missing":
+                source.unlink()
+            provider = FakeProvider()
+            paths = [source] if mutation == "selection" else [self.selected]
+            with self.subTest(mutation=mutation), self.assertRaises(ScribbleError):
+                self.build(paths=paths, name=name, config=config, provider=provider, resume=True)
+            self.assertEqual(provider.calls, [])
+            self.assertTrue((self.checkpoint(name) / "chunk-0000.json").exists())
+            source.write_bytes(original)
+
+    @unittest.skipUnless(ScribbleBuilder.checkpoint_supported(), "durable checkpoints need qualified POSIX operations")
+    def test_resume_checks_config_provider_route_and_retained_context_before_calls(self):
+        context = {"context": "original"}
+        config, _ = self.interrupted(context=context)
+        variants = [(ScribbleConfig(ai_enabled=True, chunk_bytes=128, label="refs"), FakeProvider(), context),
+                    (config, FakeProvider(model="other-model"), context),
+                    (config, FakeProvider(provider="other-provider"), context),
+                    (config, FakeProvider(), {"context": "changed"})]
+        routed = FakeProvider()
+        routed.config.parameters = {"temperature": 0.9}
+        variants.append((config, routed, context))
+        for changed, provider, restored in variants:
+            with self.subTest(config=changed, provider=provider.config), self.assertRaises(ScribbleError):
+                self.build(config=changed, provider=provider, resume=True, checkpoint_context=restored)
+            self.assertEqual(provider.calls, [])
+
+    @unittest.skipUnless(ScribbleBuilder.checkpoint_supported(), "durable checkpoints need qualified POSIX operations")
+    def test_progress_interruption_retains_completed_response_and_sanitizes_failure(self):
+        self.source("resume.txt", "Memory allocation. " * 30)
+        config = ScribbleConfig(ai_enabled=True, chunk_bytes=128)
+        provider = FakeProvider()
+        def interrupted(value):
+            if value["phase"] == "enriching":
+                raise RuntimeError("private-progress-marker")
+        with self.assertRaises(ScribbleError) as failure:
+            self.build(config=config, provider=provider, on_progress=interrupted)
+        self.assertNotIn("private-progress-marker", str(failure.exception))
+        self.assertEqual(len(provider.calls), 1)
+        self.assertTrue((self.checkpoint() / "chunk-0000.json").exists())
+        resumed = FakeProvider()
+        result = self.build(config=config, provider=resumed, resume=True)
+        self.assertEqual(len(resumed.calls), len(result.index["chunks"]) - 1)
+        other = FakeProvider()
+        with self.assertRaisesRegex(ScribbleError, "Resume explicitly"):
+            self.build(config=config, provider=other, name="return-false",
+                       on_progress=lambda value: False if value["phase"] == "enriching" else None)
+        self.assertEqual(len(other.calls), 1)
+
+    @unittest.skipUnless(ScribbleBuilder.checkpoint_supported(), "durable checkpoints need qualified POSIX operations")
+    def test_resume_rejects_tampered_manifest_response_and_provenance(self):
+        for kind in ("manifest", "response", "request", "chunk", "usage", "gap", "foreign"):
+            name = "tamper-" + kind
+            config, _ = self.interrupted(name=name)
+            directory = self.checkpoint(name)
+            target = directory / ("manifest.json" if kind == "manifest" else "chunk-0000.json")
+            value = json.loads(target.read_text())
+            if kind == "manifest":
+                value["value"]["snapshot"]["chunks"][0]["content"] = "tampered source"
+            elif kind == "response":
+                value["value"]["response"] = semantic_response("Tampered annotation.")
+            elif kind in ("request", "chunk"):
+                value["value"]["record"]["request_sha256" if kind == "request" else "chunk_id"] = "bad"
+            elif kind == "usage":
+                value["value"]["record"]["usage"] = {"prompt_tokens": 10 ** 400}
+            elif kind == "gap":
+                target.rename(directory / "chunk-0001.json")
+            else:
+                (directory / "foreign.json").write_bytes(b"foreign bytes")
+            if kind not in ("gap", "foreign"):
+                # Rehashing the envelope cannot hide mismatched source/request/response evidence.
+                if kind != "manifest":
+                    encoded = (json.dumps(value["value"], ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode()
+                    value["sha256"] = hashlib.sha256(encoded).hexdigest()
+                target.write_text(json.dumps(value))
+            provider = FakeProvider()
+            with self.subTest(kind=kind), self.assertRaises(ScribbleError):
+                self.build(config=config, provider=provider, name=name, resume=True)
+            self.assertEqual(provider.calls, [])
+
+    @unittest.skipUnless(ScribbleBuilder.checkpoint_supported(), "durable checkpoints need qualified POSIX operations")
+    def test_resume_rejects_symlinks_insecure_permissions_and_hardlinked_record(self):
+        for kind in ("directory", "manifest", "lock", "permissions", "hardlink"):
+            name = "unsafe-" + kind
+            config, _ = self.interrupted(name=name)
+            directory = self.checkpoint(name)
+            foreign = self.root / ("foreign-" + kind)
+            foreign.write_bytes(b"foreign bytes")
+            if kind == "directory":
+                moved = directory.with_name(directory.name + ".moved")
+                directory.rename(moved)
+                directory.symlink_to(moved, target_is_directory=True)
+            elif kind in ("manifest", "lock"):
+                target = directory / ("manifest.json" if kind == "manifest" else "lock")
+                target.unlink()
+                target.symlink_to(foreign)
+            elif kind == "permissions":
+                directory.chmod(0o755)
+            else:
+                os.link(directory / "chunk-0000.json", self.root / "linked-record")
+            provider = FakeProvider()
+            with self.subTest(kind=kind), self.assertRaises(ScribbleError):
+                self.build(config=config, provider=provider, name=name, resume=True)
+            self.assertEqual(provider.calls, [])
+            self.assertEqual(foreign.read_bytes(), b"foreign bytes")
+
+    @unittest.skipUnless(ScribbleBuilder.checkpoint_supported(), "durable checkpoints need qualified POSIX operations")
+    def test_resume_refuses_active_lock_and_releases_lock_after_failure(self):
+        import fcntl
+        config, _ = self.interrupted()
+        descriptor = os.open(self.checkpoint() / "lock", os.O_RDWR)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            provider = FakeProvider()
+            with self.assertRaisesRegex(ScribbleError, "active build"):
+                self.build(config=config, provider=provider, resume=True)
+            self.assertEqual(provider.calls, [])
+        finally:
+            os.close(descriptor)
+        self.assertTrue(self.build(config=config, provider=FakeProvider(), resume=True).index["chunks"])
+
+    @unittest.skipUnless(ScribbleBuilder.checkpoint_supported(), "durable checkpoints need qualified POSIX operations")
+    def test_checkpoint_trees_and_explicit_checkpoint_children_are_never_sources(self):
+        config, _ = self.interrupted()
+        provider = FakeProvider()
+        with self.assertRaisesRegex(ScribbleError, "no eligible"):
+            self.build(paths=[self.checkpoint() / "manifest.json"], config=config, provider=provider, name="child")
+        self.assertEqual(provider.calls, [])
+        result = self.build(paths=[self.root], name="root-scan")
+        self.assertEqual([source["path"] for source in result.index["sources"]], [str(self.selected / "resume.txt")])
+
+    @unittest.skipUnless(ScribbleBuilder.checkpoint_supported(), "durable checkpoints need qualified POSIX operations")
+    def test_resume_preserves_foreign_output_before_provider_calls(self):
+        config, _ = self.interrupted()
+        output = self.root / "generated"
+        output.mkdir()
+        (output / "index.json").write_bytes(b"foreign bytes")
+        provider = FakeProvider()
+        with self.assertRaisesRegex(ScribbleError, "collide"):
+            self.build(config=config, provider=provider, resume=True)
+        self.assertEqual(provider.calls, [])
+        self.assertEqual((output / "index.json").read_bytes(), b"foreign bytes")
+
+    def crashed_child(self, window, name):
+        source = self.source("crash.txt", "Memory allocation source integrity. " * 12)
+        code = r'''import importlib.util, os, sys
+from pathlib import Path
+from workbench.services.scribbles import ScribbleBuilder, ScribbleConfig
+# Discovery and package runs assign different module names to this same fixture.
+# Recreate the parent's exact trusted test-module identity in the child.
+spec = importlib.util.spec_from_file_location(sys.argv[4], sys.argv[5])
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+FakeProvider = getattr(module, sys.argv[6])
+real_link, real_unlink = os.link, os.unlink
+window = sys.argv[3]
+linked_chunk = False
+def link(src, dst, *args, **kwargs):
+    global linked_chunk
+    result = real_link(src, dst, *args, **kwargs)
+    if str(dst) == "chunk-0000.json":
+        linked_chunk = True
+    if window == "final" and str(src) == "scribbles.md" and str(dst) == "scribbles.md":
+        os._exit(19)
+    return result
+def unlink(path, *args, **kwargs):
+    if window == "record" and linked_chunk and str(path).startswith(".pending-"):
+        os._exit(19)
+    return real_unlink(path, *args, **kwargs)
+os.link, os.unlink = link, unlink
+ScribbleBuilder(ScribbleConfig(ai_enabled=True, chunk_bytes=128), FakeProvider()).build([Path(sys.argv[1])], Path(sys.argv[2]), checkpoint_context={"context": "retained"})
+'''
+        # Patching the wrappers changes membership checks, so advertise the original capabilities.
+        code = code.replace("os.link, os.unlink = link, unlink", "os.supports_dir_fd.update((link, unlink))\nos.link, os.unlink = link, unlink")
+        result = subprocess.run([sys.executable, "-B", "-c", code, str(source), str(self.root / name), window,
+                                 FakeProvider.__module__, str(Path(__file__).resolve()), FakeProvider.__qualname__],
+                                cwd=str(Path(__file__).resolve().parents[2]), stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+        self.assertEqual(result.returncode, 19, result.stderr.decode())
+        return source
+
+    @unittest.skipUnless(ScribbleBuilder.checkpoint_supported(), "durable checkpoints need qualified POSIX operations")
+    def test_hard_crash_after_response_link_recovers_only_proven_pending_alias(self):
+        source = self.crashed_child("record", "record-crash")
+        config = ScribbleConfig(ai_enabled=True, chunk_bytes=128)
+        directory = self.checkpoint("record-crash")
+        record = directory / "chunk-0000.json"
+        self.assertEqual(record.stat().st_nlink, 2)
+        before_names = sorted(path.name for path in directory.iterdir())
+        provider = FakeProvider()
+        builder = ScribbleBuilder(config, provider)
+        self.assertEqual(builder.checkpoint_context(self.root / "record-crash"), {"context": "retained"})
+        self.assertEqual(sorted(path.name for path in directory.iterdir()), before_names)
+        self.assertEqual(record.stat().st_nlink, 2)
+        result = builder.build([source], self.root / "record-crash", resume=True, checkpoint_context={"context": "retained"})
+        self.assertEqual(record.stat().st_nlink, 1)
+        self.assertEqual(len(provider.calls), len(result.index["chunks"]) - 1)
+
+    @unittest.skipUnless(ScribbleBuilder.checkpoint_supported(), "durable checkpoints need qualified POSIX operations")
+    def test_hard_crash_during_final_publication_resumes_without_provider_replay(self):
+        source = self.crashed_child("final", "final-crash")
+        config = ScribbleConfig(ai_enabled=True, chunk_bytes=128)
+        provider = FakeProvider()
+        result = self.build(paths=[source], config=config, provider=provider, name="final-crash", resume=True,
+                            checkpoint_context={"context": "retained"})
+        self.assertEqual(provider.calls, [])
+        self.assertEqual(ScribbleBuilder().load(result.index_path.parent).index, result.index)
+        for name in ("scribbles.md", "index.json", "evidence.json"):
+            self.assertEqual((self.root / "final-crash" / name).stat().st_ino,
+                             (self.checkpoint("final-crash") / name).stat().st_ino)
+        # A hash-identical foreign inode is still a collision.
+        raw = result.index_path.read_bytes()
+        result.index_path.unlink()
+        result.index_path.write_bytes(raw)
+        with self.assertRaisesRegex(ScribbleError, "collide"):
+            self.build(paths=[source], config=config, provider=provider, name="final-crash", resume=True,
+                       checkpoint_context={"context": "retained"})
+        self.assertEqual(result.index_path.read_bytes(), raw)
+        self.assertEqual(provider.calls, [])
+
+    @unittest.skipUnless(ScribbleBuilder.checkpoint_supported(), "durable checkpoints need qualified POSIX operations")
+    def test_checkpoint_json_is_bounded_and_strict_without_echoing_contents(self):
+        for kind in ("truncated", "duplicate", "depth", "integer", "nonfinite", "oversize"):
+            name = "json-" + kind
+            config, _ = self.interrupted(name=name)
+            path = self.checkpoint(name) / "manifest.json"
+            malformed = {"truncated": b'{"private-marker":', "duplicate": b'{"value":{},"value":{},"sha256":"x"}',
+                         "depth": ("[" * 2000 + "0" + "]" * 2000).encode(), "integer": ("1" * 5000).encode(),
+                         "nonfinite": b'{"value":{"x":1e999},"sha256":"x"}'}
+            path.write_bytes(malformed[kind] if kind != "oversize" else b"x")
+            provider = FakeProvider()
+            builder = ScribbleBuilder(config, provider)
+            if kind == "oversize":
+                with patch.object(builder, "_checkpoint_bound", return_value=0), self.assertRaises(ScribbleError):
+                    builder.checkpoint_context(self.root / name)
+            else:
+                with self.subTest(kind=kind), self.assertRaises(ScribbleError) as failure:
+                    builder.checkpoint_context(self.root / name)
+                self.assertNotIn("private-marker", str(failure.exception))
+            self.assertEqual(provider.calls, [])
+
+    def test_fresh_build_fallback_preserves_supported_baseline_without_resume_primitives(self):
+        self.source("portable.txt", "Local memory allocation source.")
+        provider = FakeProvider()
+        with patch("workbench.services.scribbles._Checkpoint.supported", return_value=False):
+            result = self.build(config=ScribbleConfig(ai_enabled=True), provider=provider)
+            self.assertEqual(len(provider.calls), 1)
+            self.assertFalse(self.checkpoint().exists())
+            self.assertEqual(ScribbleBuilder().load(result.index_path.parent).index, result.index)
+            with self.assertRaisesRegex(ScribbleError, "qualified POSIX"):
+                self.build(config=ScribbleConfig(ai_enabled=True), provider=provider, resume=True)
+            self.assertEqual(len(provider.calls), 1)
 
 
 if __name__ == "__main__":

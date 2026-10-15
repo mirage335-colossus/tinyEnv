@@ -6,6 +6,173 @@ development checks and the Linux FLTK smoke passed; evidence below establishes
 only its named source and scope. It does not add application-release, SDK or
 binary-publication work.
 
+The expanded Code tool handoff was checked on 2026-10-08 at source
+`18f404cdc7d01918e425741dc0b2a46806eddcb0e98d87dc8cb5a7a429d7b0d1`.
+Implementation is complete in this scope. Selector shows **Code**, retaining
+the existing per-chat `selector.calculations` state and `calculate` tool name.
+The bounded numeric interpreter now supports custom functions, `while` loops,
+bit operations, slices and scalar array updates. Explicit input accepts only
+finite numeric/boolean values and nested lists, privately copied. There is no
+image decoder, attachment/file access, import or general Python execution.
+Source rejects quotes, backslashes, non-ASCII and other unsupported controls
+before parsing; combined evaluation nesting and existing resource limits bound
+execution. Numeric pixel algorithms check their own dimensions/channel ranges.
+
+- The supported optimized build and all fifteen workbench CTests passed,
+  including 506 Python cases with zero skips. Command:
+  `CMAKE_PREFIX_PATH=.agent-work/workbench-integration/fltk-dev ./build.sh
+  workbench test release --backend fltk --build-dir build/workbench-code-v14
+  --build-jobs 4 --test-jobs 2`. It took 64.398 seconds with source unchanged.
+  Exact inputs, command, internal results and artifact hashes are retained in
+  `.agent-work/code-tool-root-v14/consistent/`. Thirteen copied service/helper
+  modules match their sources; the generated path module is accounted for in
+  `runtime-copy.json`.
+- Seventeen private-Xvfb checks passed: production smoke, native Code label
+  and help, an older state defaulting off, opt-in autosaved before closing,
+  restart and per-chat separation, custom IIR output, encoded-string rejection
+  followed by raw-pixel correction, bounded tool accounting and saved/drawn
+  replies. The copied production runtime used a guarded fake provider.
+  Screenshots were reviewed. Evidence is in `.agent-work/code-native-v14/final/`,
+  `host-final/` and `.agent-work/code-tool-root-v14/native-final/`. Source and
+  native inputs remained unchanged. All owned app, worker and display
+  processes finished; synthetic workspaces, display socket and lock were removed.
+- Independent boundary review passed 181 synthetic probes with zero skips.
+  Algorithm acceptance covers biquad impulse, step and frequency responses,
+  pixel convolution/components, finder patterns and GF256/Reed-Solomon
+  primitives. These establish no complete QR decoder or image-recognition
+  quality. Root's 21 focused runtime/algorithm cases and the extracted
+  documentation example also passed. Original identities and limits remain
+  under `.agent-work/code-security-v14/`, `code-algorithms-v14/`,
+  `code-language-v14/`, `code-docs-v14/revised-depth/` and
+  `code-tool-root-v14/focused/`.
+- Review found and repaired composed host-stack exhaustion by adding the
+  combined evaluation-depth cap. Source-length and argument-cardinality checks
+  now precede broader traversal. Preliminary probe-harness failures and the
+  pre-repair nesting failure remain preserved with their original identities;
+  none are counted as passing evidence.
+
+The executable is `build/workbench-code-v14/tinyenv-workbench-fltk`, SHA-256
+`fcfc64674c3c280e16a3f081ddea68d3b4784ac24da1139e111eb30bda207451`.
+Generic GUI inputs remain in the retained group below. All checks were offline
+and synthetic; no real chat, user desktop, credential or external service was
+used. Live model algorithm quality, broad platform/window-manager and release
+qualification remain unverified and await explicit qualification authorization.
+Next manual action: launch `./build/workbench-code-v14/tinyenv-workbench-fltk`,
+enable **Selector → Code**, then request a computation on explicit numeric data.
+This receipt is a subsequent documentation-only change.
+
+The persistent Scribble workspace handoff was checked on 2026-10-08 at source
+`cee34c467fbc20b58ecee49b3ecc9bc2a82af7eab42dfb5c6f430561a9920cb7`.
+Implementation is complete in this scope. Setup, Tasks and Results retain
+per-chat drafts and task records. Explicit Exit keeps running work; Escape does
+not leave the workspace or cancel a task. Reopening starts no work. Supported
+POSIX builds save completed annotations and research context for explicit Resume;
+an interrupted request whose response was not saved may repeat. The call budget
+applies per invocation, not across all attempts. Evaluations can be retried as
+new records. Windows fresh builds remain available without durable Resume; the
+existing macOS worker limitation remains.
+
+- The supported optimized build and all fifteen workbench CTests passed,
+  including 484 Python cases with zero skips. Final command:
+  `CMAKE_PREFIX_PATH=.agent-work/workbench-integration/fltk-dev ./build.sh
+  workbench test release --backend fltk --build-dir
+  build/workbench-scribble-mode-v13 --build-jobs 4 --test-jobs 2`.
+  It took 37.109 seconds with source unchanged. Exact inputs, commands, logs and
+  artifact hashes are in
+  `.agent-work/scribble-mode-root-v13/consistent-ui-fixed/`.
+- Nineteen focused private-Xvfb checks passed, including production smoke,
+  actual typing, three tabs, saved setup, harmless Escape, Exit retaining the
+  same worker, Pause, paused restart without launch, and explicit Resume using
+  one saved annotation and generating only the remaining two. The copied
+  production runtime and checkpoint implementation ran against a guarded fake
+  provider. Exact source bytes, unchanged task request, three artifact hashes,
+  separate Results and reentry were verified. Screenshots were reviewed.
+  Evidence is in `.agent-work/scribble-native-v13/ui-fixed/`, `host-ui-fixed/`
+  and `.agent-work/scribble-mode-root-v13/native-ui-fixed/`. All owned app,
+  worker and display processes joined; synthetic workspaces, display sockets
+  and locks were removed. Active shutdown recovery is covered by application
+  fixtures, and research reuse by runtime fixtures, not by this native scenario.
+- Focused storage review passed fifteen offline adversarial probes, including
+  process death during checkpoint and final-artifact publication, exact input
+  identity checks, lock contention and preservation of foreign output. Runtime
+  fixtures verify completed-chunk and research reuse. Independent state,
+  integration and UI reviews passed. Their original identities and limitations
+  remain in `.agent-work/scribble-resume-review-v13/`,
+  `scribble-runtime-v13/`, `scribble-state-v13/`, `scribble-ui-v13/` and
+  `scribble-integration-review-v13/`.
+- Initial integrated runs exposed two test-fixture defects: differing parent
+  and child module identities, and a same-byte rewrite that did not reliably
+  change file identity. Fixtures now preserve the exact adapter identity and
+  use a verified replacement inode; product checks were not weakened. The
+  first native run then exposed focus loss after the first typed character.
+  The repaired UI keeps fields and ancestor panels stable while separately
+  invalidating changed task actions and explicitly reset setup. Its regression
+  and the unchanged native input sequence pass. Original failures remain in
+  `consistent/`, `consistent-fixed/`, `native-final/` and the owning agents'
+  repair records; none are relabeled as successful checks.
+
+The executable is `build/workbench-scribble-mode-v13/tinyenv-workbench-fltk`,
+SHA-256 `1df32ad770cf25e3674cb29ea99a4247f971015d3bfcde7942433c34f84cb743`.
+Generic GUI inputs are unchanged from the retained group below. All new checks
+were offline and synthetic; no real chat, user desktop, credentials, account or
+external service was accessed. Live provider quality/scale, power-loss durability,
+broader platform/window-manager and release qualification remain unverified.
+Next manual action: launch
+`./build/workbench-scribble-mode-v13/tinyenv-workbench-fltk`, then open
+**Build Scribble / Ref…** from Selector or Files. This receipt is a subsequent
+documentation-only change.
+
+The Scribble discovery, restricted calculations and Sidebar handoff was checked
+on 2026-10-08 at source
+`ed577c6037b6d8d495e8366a9c6e7ac3d23b775f8f64fcd024dbd77e7dc6efe2`.
+Implementation is complete in this scope. Selector and Files now expose the
+builder directly. It starts with local indexing and explicit source inputs;
+AI annotations require an explicit mode/model, and evaluation cannot inherit
+hidden research settings. Calculations is a separate per-chat opt-in for a
+bounded numeric AST language, with no general Python or I/O capability. Sidebar
+visibility persists globally, reclaims center width and preserves chat drafts.
+
+- The supported optimized build and all fifteen workbench CTests passed,
+  including 459 Python cases with zero skips. Command:
+  `CMAKE_PREFIX_PATH=.agent-work/workbench-integration/fltk-dev ./build.sh
+  workbench test release --backend fltk --build-dir build/workbench-tools-v12
+  --build-jobs 4 --test-jobs 2`. It took 60.136 seconds with source unchanged.
+  Commands, inventories, logs and hashes are retained in
+  `.agent-work/workbench-tools-root-v12/consistent/`.
+- Fourteen focused private-Xvfb checks passed, including production smoke,
+  actual Sidebar hide/show/restart geometry and draft retention, both visible
+  builder entries, local construction of the three verified artifacts, and
+  an explicit calculation tool round trip through an in-memory fake provider.
+  The copied production runtime and calculator were used; no provider,
+  credentials or research loader was allowed. Source bytes, hashes and output
+  provenance were verified. Screenshots were reviewed. Evidence is in
+  `.agent-work/workbench-native-v12/final/`, `host-build/` and
+  `.agent-work/workbench-tools-root-v12/native-final/`. All owned application,
+  worker and display processes joined; temporary source files, display sockets
+  and locks were removed. The optional 900x640 native scenario was not run.
+- Focused interpreter and runtime reviews passed 130 adversarial interpreter
+  cases and 109 runtime assertions. They cover complete forbidden-syntax
+  rejection, resource limits before expensive work/output, strict opt-in,
+  shared tool budgets, bounded correction errors and withheld malformed tool
+  envelopes. UI/core/docs review and documentation/whitespace checks passed.
+  Evidence is under `.agent-work/calculation-review-v12/`,
+  `calculation-runtime-v12/` and `workbench-review-v12/`. Initial focused UI
+  runs failed because Sidebar restoration tried to scroll non-scrollable
+  controls; the corrected scrollable-only restoration passed its discriminating
+  fixtures and the final native checks. Original failures remain recorded.
+
+The executable is `build/workbench-tools-v12/tinyenv-workbench-fltk`, SHA-256
+`30595509f4c86cd3d630a0be5450fa107d7c9e2170bc6e95cca40127f1bcf486`.
+Generic GUI inputs are unchanged from the retained v11 group below. All new
+checks were offline and used synthetic data; no user desktop, real chat,
+credential, account or external service was accessed. Live provider/tool
+adoption, AI enrichment quality/scale and broader platform/window-manager or
+release qualification remain unverified by this handoff. Existing earlier
+receipts retain their own scope. Next manual action: launch
+`./build/workbench-tools-v12/tinyenv-workbench-fltk`; use Selector or Files for
+the builder, Selector for Calculations and the bottom-bar Sidebar checkbox.
+This receipt is a subsequent documentation-only change.
+
 The graphical-table, quiet-divider and native streaming-follow handoff was
 checked on 2026-10-08 at source
 `891a25a76bd544224c09cf7fbba3b738f1bf5316889bb3966cd3944ff6592df8`.
@@ -1017,7 +1184,8 @@ compatible model and WAV. These implementation boundaries
 are not pending passing tests.
 
 Model-directed Bash and custom executable tool descriptors are unimplemented;
-the selected model tools currently read/list/search bounded local files. The
+the selected model tools read/list/search bounded local files and, when
+separately enabled, interpret bounded numeric calculations. The
 user-operated Bash terminal is separate. This feature boundary is not an
 unexecuted qualification scope.
 

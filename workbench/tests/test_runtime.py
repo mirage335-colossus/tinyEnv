@@ -1104,6 +1104,279 @@ class RuntimeTests(unittest.TestCase):
                     self.assert_invalid(request)
                 self.assertEqual(attempted, [])
 
+    def test_calculations_default_off_and_strict_boolean_preflight(self):
+        envelope = json.dumps({'tool_calls': [{'tool': 'calculate', 'arguments': {'code': '1+2'}}]})
+        self.provider = RecordingProvider([{'text': envelope}])
+        response = self.execute(self.request())
+        self.assert_response(response, False)
+        self.assertEqual(len(self.provider.calls), 1)
+        self.assertEqual(response['usage']['tool_calls'], 0)
+        self.assertNotIn('calculate', self.provider.calls[0]['messages'][0]['content'])
+        for value in (None, 0, 1, 'true', [], {}):
+            with self.subTest(value=value):
+                request = self.request()
+                request['selector']['calculations'] = value
+                self.assert_invalid(request)
+
+    def test_calculations_only_chat_and_agent_before_any_service(self):
+        factory = mock.Mock(side_effect=AssertionError('unavailable calculation reached service'))
+        for operation in runtime.OPERATIONS - {'chat', 'agent'}:
+            with self.subTest(operation=operation):
+                request = self.request(operation=operation)
+                request['selector']['calculations'] = True
+                response = self.execute(request, research_factory=factory, scribble_factory=factory,
+                                        guardrail_factory=factory)
+                self.assert_response(response, False)
+                self.assertIn('only for chat and agent', response['error'])
+        factory.assert_not_called()
+        self.assertEqual(self.configs, [])
+
+    def test_calculation_returns_inert_observation_without_path_permissions(self):
+        self.provider = RecordingProvider([
+            {'text': json.dumps({'tool_calls': [{'id': 'calc', 'tool': 'calculate',
+                                               'arguments': {'code': '[(x,x*x) for x in range(3)]'}}]})},
+            {'text': 'Calculated coordinates'},
+        ])
+        request = self.request()
+        request['selector']['calculations'] = True
+        with mock.patch.object(runtime._Paths, 'resolve', side_effect=AssertionError('calculation resolved a path')):
+            response = self.execute(request)
+        self.assert_response(response, True)
+        self.assertEqual(response['usage']['tool_calls'], 1)
+        self.assertEqual(response['usage']['model_calls'], 2)
+        self.assertEqual(len(response['provenance']), 2)
+        result = json.loads(self.provider.calls[1]['messages'][-1]['content'].split('\n', 1)[1])[0]
+        self.assertEqual(result['result']['value'], [[0, 0], [1, 1], [2, 4]])
+        self.assertIs(result['untrusted'], True)
+        self.assertIs(result['instruction_authority'], False)
+        self.assertNotIn('path', result)
+        event = next(item for item in response['events'] if item['kind'] == 'local_tool')
+        self.assertNotIn('path', event)
+        policy = self.provider.calls[0]['messages'][0]['content']
+        self.assertIn('"tool": "calculate"', policy)
+        self.assertNotIn('allowed_paths', policy)
+        from workbench.services import calculations
+        self.assertIn(str(calculations.MAX_ITERATIONS), policy)
+        self.assertIn('No imports', policy)
+
+    def test_code_runs_user_functions_on_explicit_numeric_data_without_paths(self):
+        code = ('def filter_samples(samples):\n'
+                '    output = [0 for n in range(len(samples))]\n'
+                '    y1 = 0\n'
+                '    y2 = 0\n'
+                '    for n in range(len(samples)):\n'
+                '        output[n] = samples[n] + 0.5*y1 - 0.25*y2\n'
+                '        y2 = y1\n'
+                '        y1 = output[n]\n'
+                '    return output\n'
+                'filter_samples(data)')
+        self.provider = RecordingProvider([
+            {'text': json.dumps({'tool_calls': [{'id': 'filter', 'tool': 'calculate',
+                                               'arguments': {'code': code, 'data': [1, 0, 0, 0, 0]}}]})},
+            {'text': 'The explicit samples have been filtered.'},
+        ])
+        request = self.request()
+        request['selector']['calculations'] = True
+        with mock.patch.object(runtime._Paths, 'resolve', side_effect=AssertionError('Code resolved a path')):
+            response = self.execute(request)
+        self.assert_response(response, True)
+        self.assertEqual(response['usage']['tool_calls'], 1)
+        self.assertEqual(response['usage']['model_calls'], 2)
+        observation = json.loads(self.provider.calls[1]['messages'][-1]['content'].split('\n', 1)[1])[0]
+        self.assertEqual(observation['result']['value'], [1, 0.5, 0, -0.125, -0.0625])
+        self.assertTrue(observation['untrusted'])
+        self.assertFalse(observation['instruction_authority'])
+
+    def test_code_pixel_arrays_are_numeric_only_and_no_context_is_implicit_data(self):
+        code = ('def count_bright(row):\n'
+                '    total = 0\n'
+                '    for value in row:\n'
+                '        if value >= 128:\n'
+                '            total += 1\n'
+                '    return total\n'
+                '[count_bright(row) for row in data]')
+        for arguments, expected in (({'code': code, 'data': [[0, 127], [128, 255]]}, [0, 2]),
+                                    ({'code': 'data'}, [])):
+            with self.subTest(arguments=arguments):
+                self.provider = RecordingProvider([
+                    {'text': json.dumps({'tool_calls': [{'tool': 'calculate', 'arguments': arguments}]})},
+                    {'text': 'Numeric observation received.'},
+                ])
+                request = self.request(prompt='This private fixture text is not Code input data.')
+                request['selector']['calculations'] = True
+                with mock.patch.object(runtime._Paths, 'resolve', side_effect=AssertionError('Code opened an image')):
+                    response = self.execute(request)
+                self.assert_response(response, True)
+                observation = json.loads(self.provider.calls[1]['messages'][-1]['content'].split('\n', 1)[1])[0]
+                self.assertEqual(observation['result']['value'], expected)
+
+    def test_code_rejects_encoded_images_text_data_and_escape_syntax_at_tool_boundary(self):
+        arguments = [
+            {'code': 'data', 'data': 'iVBORw0KGgoAAAANSUhEUg=='},
+            {'code': 'data', 'data': {'path': 'fixture.png'}},
+            {'code': 'data', 'data': [['\\u0069mport']]},
+            {'code': 'data', 'data': None},
+            {'code': 'data', 'data': [1, '2']},
+            {'code': '1\\\n+2'},
+            {'code': '# \\u0069mport\n1'},
+            {'code': '# "quoted"\n1'},
+            {'code': '1', 'image': 'fixture.png'},
+        ]
+        for values in arguments:
+            with self.subTest(arguments=values):
+                self.provider = RecordingProvider([
+                    {'text': json.dumps({'tool_calls': [{'tool': 'calculate', 'arguments': values}]})},
+                    {'text': 'The invalid input was rejected.'},
+                ])
+                request = self.request()
+                request['selector']['calculations'] = True
+                with mock.patch.object(runtime._Paths, 'resolve', side_effect=AssertionError('Invalid Code accessed a path')):
+                    response = self.execute(request)
+                self.assert_response(response, True)
+                self.assertEqual(response['usage']['tool_calls'], 1)
+                observation = json.loads(self.provider.calls[1]['messages'][-1]['content'].split('\n', 1)[1])[0]
+                self.assertFalse(observation['result']['ok'])
+                error = observation['result']['error']
+                self.assertLessEqual(len(error), 200)
+                self.assertTrue(error.isascii())
+                self.assertNotIn('iVBOR', error)
+
+    def test_invalid_calculation_can_be_corrected_and_consumes_tool_budget(self):
+        self.provider = RecordingProvider([
+            {'text': json.dumps({'tool_calls': [{'id': 'bad', 'tool': 'calculate',
+                                               'arguments': {'code': 'import os'}}]})},
+            {'text': json.dumps({'tool_calls': [{'id': 'fixed', 'tool': 'calculate',
+                                               'arguments': {'code': '3**2'}}]})},
+            {'text': 'The result is 9'},
+        ])
+        request = self.request()
+        request['selector']['calculations'] = True
+        response = self.execute(request)
+        self.assert_response(response, True)
+        self.assertEqual(response['usage']['tool_calls'], 2)
+        errors = json.loads(self.provider.calls[1]['messages'][-1]['content'].split('\n', 1)[1])
+        self.assertIs(errors[0]['result']['ok'], False)
+        self.assertEqual(errors[0]['result']['error_code'], 'invalid_calculation')
+        self.assertEqual([item['ok'] for item in response['events'] if item['kind'] == 'local_tool'], [False, True])
+
+    def test_calculation_rejects_bad_arguments_with_bounded_errors(self):
+        for arguments in (None, [], {}, {'code': 1}, {'code': '1', 'path': '../secret'}):
+            with self.subTest(arguments=arguments):
+                self.provider = RecordingProvider([
+                    {'text': json.dumps({'tool_calls': [{'tool': 'calculate', 'arguments': arguments}]})},
+                    {'text': 'Corrected answer'},
+                ])
+                request = self.request()
+                request['selector']['calculations'] = True
+                response = self.execute(request)
+                self.assert_response(response, True)
+                result = json.loads(self.provider.calls[1]['messages'][-1]['content'].split('\n', 1)[1])[0]
+                self.assertIs(result['result']['ok'], False)
+                self.assertLessEqual(len(result['result']['error']), 200)
+                self.assertEqual(response['usage']['tool_calls'], 1)
+
+    def test_calculation_preserves_independently_selected_file_tool(self):
+        self.write('notes.md', 'Selected file observation')
+        self.write('read.tol', json.dumps({'tool': 'read_file', 'allowed_paths': ['notes.md']}))
+        self.provider = RecordingProvider([
+            {'text': json.dumps({'tool_calls': [
+                {'tool': 'calculate', 'arguments': {'code': '1+2'}},
+                {'tool': 'read_file', 'arguments': {'path': 'notes.md'}},
+            ]})}, {'text': 'Combined answer'},
+        ])
+        request = self.request()
+        request['selector'].update(calculations=True, tools=[{'path': 'read.tol', 'enabled': True}])
+        response = self.execute(request)
+        self.assert_response(response, True)
+        self.assertEqual(response['usage']['tool_calls'], 2)
+        results = json.loads(self.provider.calls[1]['messages'][-1]['content'].split('\n', 1)[1])
+        self.assertEqual(results[0]['result']['value'], 3)
+        self.assertEqual(results[1]['result']['text'], 'Selected file observation')
+
+    def test_calculation_descriptor_does_not_grant_numeric_or_script_authority(self):
+        self.write('calc.tol', json.dumps({'tool': 'calculate', 'allowed_paths': ['.']}))
+        request = self.request()
+        request['selector'].update(calculations=True, tools=[{'path': 'calc.tol', 'enabled': True}])
+        response = self.assert_invalid(request)
+        self.assertIn('Unknown built-in tool', response['error'])
+
+    def test_failed_calculations_use_existing_round_and_call_budgets(self):
+        for count in (1, 3):
+            with self.subTest(count=count):
+                calls = [{'tool': 'calculate', 'arguments': {'code': '1/0'}} for _ in range(count)]
+                self.provider = RecordingProvider([{'text': json.dumps({'tool_calls': calls})}] * 6)
+                request = self.request()
+                request['selector']['calculations'] = True
+                response = self.execute(request)
+                self.assert_response(response, False)
+                self.assertIn('tool budget exhausted', response['error'])
+                self.assertEqual(response['usage']['tool_calls'], 4 if count == 1 else 6)
+                self.assertEqual(len(self.provider.calls), 5 if count == 1 else 3)
+
+    def test_calculation_agent_followups_obey_model_and_output_budgets(self):
+        envelope = {'text': json.dumps({'tool_calls': [{'tool': 'calculate', 'arguments': {'code': '1+2'}}]}),
+                    'usage': {'output_tokens': 2}}
+        for max_calls in (1, 2):
+            with self.subTest(max_calls=max_calls):
+                self.provider = RecordingProvider([envelope, {'text': '3', 'usage': {'output_tokens': 1}}])
+                request = self.request(operation='agent', pseudocode='agent solver: Calculate',
+                                       agent_budget={'max_calls': max_calls, 'max_output_tokens': 4})
+                request['selector']['calculations'] = True
+                response = self.execute(request)
+                self.assert_response(response, max_calls == 2)
+                self.assertEqual(response['usage']['tool_calls'], 1)
+                self.assertEqual(len(self.provider.calls), max_calls)
+                if max_calls == 2:
+                    self.assertEqual(self.provider.calls[1]['max_output_tokens'], 2)
+                    self.assertEqual(response['text'], '3')
+
+    def test_streaming_calculation_envelopes_and_errors_stay_inert(self):
+        bad = json.dumps({'tool_calls': [{'tool': 'calculate', 'arguments': {'code': 'open("x")'}}]})
+        good = json.dumps({'tool_calls': [{'tool': 'calculate', 'arguments': {'code': '2+2'}}]})
+        self.provider = StreamingProvider([{'text': bad}, {'text': good}, {'text': 'Result 4'}],
+                                          [[bad[:12], bad[12:]], [good], ['Result ', '4']])
+        snapshots = []
+        request = self.request(stream=True)
+        request['selector']['calculations'] = True
+        response = self.execute(request, on_text=snapshots.append)
+        self.assert_response(response, True)
+        self.assertEqual(response['text'], 'Result 4')
+        self.assertEqual(response['usage']['tool_calls'], 2)
+        self.assertTrue(all('tool_calls' not in text and 'open' not in text for text in snapshots))
+        self.assertIn('Result 4', snapshots)
+
+    def test_malformed_calculation_envelopes_never_become_visible_prose(self):
+        valid = json.dumps({'tool_calls': [{'tool': 'calculate', 'arguments': {'code': '6*7'}}]})
+        envelopes = (valid[:-1], '{"tool_calls":[],"tool_calls":[]}',
+                     '{"tool_calls":[{"tool":"calculate","arguments":{"code":NaN}}]}',
+                     '{"tool\\u005fcalls":[],"tool\\u005fcalls":[]}')
+        for envelope in envelopes:
+            with self.subTest(envelope=envelope):
+                self.provider = StreamingProvider([{'text': envelope}], [['  ', envelope[:12], envelope[12:]]])
+                snapshots = []
+                request = self.request(stream=True)
+                request['selector']['calculations'] = True
+                response = self.execute(request, on_text=snapshots.append)
+                self.assert_response(response, False)
+                self.assertEqual(response['text'], '')
+                self.assertIn('tool-call envelope', response['error'])
+                self.assertEqual(response['usage']['tool_calls'], 0)
+                self.assertEqual(len(self.provider.calls), 1)
+                self.assertTrue(all('tool_calls' not in text and 'calculate' not in text for text in snapshots))
+
+    def test_ordinary_json_answers_and_quoted_tool_names_remain_visible(self):
+        answers = ('{"value":42}', '{"nested":{"tool_calls":"ordinary data"}}',
+                   '{"text":"an escaped \\"tool_calls\\": mention"',
+                   '{"value":42')
+        for answer in answers:
+            with self.subTest(answer=answer):
+                self.provider = StreamingProvider([{'text': answer}], [[answer]])
+                snapshots = []
+                response = self.execute(self.request(stream=True), on_text=snapshots.append)
+                self.assert_response(response, True)
+                self.assertEqual(response['text'], answer)
+                self.assertIn(answer, snapshots)
+
     def test_selected_read_file_tool_runs_then_returns_model_answer(self):
         self.write("notes.md", "ACTUAL TOOL FILE PAYLOAD")
         self.write("read.tol", json.dumps({"tool": "read_file", "allowed_paths": ["."]}))
@@ -1853,11 +2126,24 @@ class RuntimeTests(unittest.TestCase):
                              "evidence": {"source_count": 1}})
 
         class Builder:
-            def build(self, paths, output_dir):
+            def checkpoint_context(self, output_dir):
+                owner.scribble_calls.append(("checkpoint_context", output_dir))
+                return copy.deepcopy(getattr(owner, "scribble_snapshot", None))
+
+            def build(self, paths, output_dir, *, resume=False, on_progress=None, checkpoint_context=None):
                 owner.scribble_calls.append(("build", paths, output_dir))
+                owner.scribble_build_options = {"resume": resume, "checkpoint_context": copy.deepcopy(checkpoint_context)}
+                if not resume:
+                    owner.scribble_snapshot = copy.deepcopy(checkpoint_context)
+                if on_progress is not None:
+                    on_progress({"phase": "indexing", "completed_chunks": 0,
+                                 "total_chunks": 1, "resumed_chunks": 0})
                 if config.ai_enabled:
                     answer = provider.complete([{"role": "user", "content": "Enrich selected source"}], purpose="scribble")
                     result.markdown = answer["text"]
+                if on_progress is not None:
+                    on_progress({"phase": "completed", "completed_chunks": 1,
+                                 "total_chunks": 1, "resumed_chunks": int(resume)})
                 return result
 
             def load(self, output_dir):
@@ -1893,6 +2179,207 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(self.scribble_calls[0], ("build", [source], self.root / "built"))
         self.assertIn(str(self.root / "built/scribbles.md"), response["text"])
         self.assertEqual(self.provider.calls[0]["purpose"], "scribble")
+
+    def test_scribble_resume_is_explicit_strict_boolean_before_services(self):
+        self.write("source.md", "Source text")
+        for value in (None, 0, 1, "true", [], {}):
+            with self.subTest(resume=value):
+                request = self.request(operation="scribble", input_paths=["source.md"], output_dir="built",
+                                       scribble={"resume": value})
+                response = self.execute(request, scribble_factory=self.scribble_factory)
+                self.assert_response(response, False)
+                self.assertIn("boolean", response["error"])
+                self.assertEqual(self.configs, [])
+                self.assertEqual(self.scribble_calls, [])
+        response = self.execute(self.request(operation="evaluate", output_dir="built", questions=["Question?"],
+                                             scribble={"resume": True}), scribble_factory=self.scribble_factory)
+        self.assert_response(response, False)
+        self.assertEqual(self.configs, [])
+
+    def test_scribble_progress_is_separate_from_assistant_previews(self):
+        self.write("source.md", "Source text")
+        previews, progress = [], []
+        response = self.execute(self.request(operation="scribble", input_paths=["source.md"], output_dir="built",
+                                             stream=True, scribble={"ai_enabled": False}),
+                                scribble_factory=self.scribble_factory, on_text=previews.append,
+                                on_progress=progress.append)
+        self.assert_response(response, True)
+        self.assertEqual(previews, [])
+        self.assertEqual([value["phase"] for value in progress], ["indexing", "completed"])
+        self.assertTrue(all(set(value) == {"phase", "completed_chunks", "total_chunks", "resumed_chunks"}
+                            for value in progress))
+        self.assertIs(self.scribble_build_options["resume"], False)
+
+    def test_scribble_resume_reuses_exact_research_before_provider_construction(self):
+        self.write("source.md", "Source text")
+        request = self.request(operation="scribble", input_paths=["source.md"], output_dir="built",
+                               research_queries=["Directory creation errno"])
+        request["selector"]["deep_research"] = True
+        response = self.execute(request, research_factory=self.research_factory,
+                                scribble_factory=self.scribble_factory)
+        self.assert_response(response, True)
+        messages = self.provider.calls[0]["messages"]
+        snapshot = copy.deepcopy(self.scribble_snapshot)
+        self.provider = RecordingProvider()
+        request["scribble"] = {"resume": True}
+        request["stream"] = True
+        request["settings"]["base_url"] = request["settings"].pop("endpoint")
+        response = self.execute(request, research_factory=mock.Mock(side_effect=AssertionError("research replayed")),
+                                scribble_factory=self.scribble_factory)
+        self.assert_response(response, True)
+        self.assertEqual(self.provider.calls[0]["messages"], messages)
+        self.assertEqual(self.scribble_calls[0], ("checkpoint_context", self.root / "built"))
+        self.assertIs(self.scribble_build_options["resume"], True)
+        self.assertEqual(self.scribble_build_options["checkpoint_context"], snapshot)
+        self.assertTrue(any(event["kind"] == "scribble_checkpoint_restored" for event in response["events"]))
+
+    def test_scribble_resume_rejects_changed_binding_before_provider_or_research(self):
+        self.write("source.md", "Source text")
+        request = self.request(operation="scribble", input_paths=["source.md"], output_dir="built",
+                               research_queries=["Directory creation errno"], scribble={"ai_enabled": False})
+        request["selector"]["deep_research"] = True
+        self.assert_response(self.execute(request, research_factory=self.research_factory,
+                                          scribble_factory=self.scribble_factory), True)
+        snapshot = copy.deepcopy(self.scribble_snapshot)
+        changes = [("prompt", "Changed topic"), ("research_queries", ["Changed query"]),
+                   ("research_source", "stackoverflow"), ("research_limits", {"max_results": 1}),
+                   ("input_paths", [str(self.root)]), ("settings", dict(request["settings"], model="changed")),
+                   ("scribble", {"ai_enabled": False, "chunk_bytes": 128})]
+        for field, value in changes:
+            with self.subTest(field=field):
+                changed = copy.deepcopy(request)
+                changed[field] = value
+                changed["scribble"]["resume"] = True
+                self.configs.clear()
+                self.scribble_snapshot = copy.deepcopy(snapshot)
+                response = self.execute(changed, research_factory=mock.Mock(side_effect=AssertionError("research replayed")),
+                                        scribble_factory=self.scribble_factory)
+                self.assert_response(response, False)
+                self.assertIn("settings changed", response["error"])
+                self.assertEqual(self.configs, [])
+                self.assertEqual([call[0] for call in self.scribble_calls], ["checkpoint_context"])
+
+    def test_scribble_resume_binds_effective_provider_web_research_toggle(self):
+        self.write("source.md", "Source text")
+        request = self.request(operation="scribble", input_paths=["source.md"], output_dir="built",
+                               research_queries=["Directory creation errno"])
+        request["settings"]["web_search"] = True
+        self.assert_response(self.execute(request, research_factory=self.research_factory,
+                                          scribble_factory=self.scribble_factory), True)
+        request["settings"]["web_search"] = False
+        request["scribble"] = {"resume": True}
+        self.configs.clear()
+        response = self.execute(request, research_factory=mock.Mock(side_effect=AssertionError("research replayed")),
+                                scribble_factory=self.scribble_factory)
+        self.assert_response(response, False)
+        self.assertEqual(self.configs, [])
+
+    def test_scribble_resume_rejects_invalid_saved_context_without_provider(self):
+        self.write("source.md", "Source text")
+        request = self.request(operation="scribble", input_paths=["source.md"], output_dir="built",
+                               scribble={"ai_enabled": False})
+        self.assert_response(self.execute(request, scribble_factory=self.scribble_factory), True)
+        snapshot = copy.deepcopy(self.scribble_snapshot)
+        request["scribble"]["resume"] = True
+        corruptions = [("context", "\ud800"), ("sources", ["untrusted scalar"]),
+                       ("usage", {"input_tokens": 0, "output_tokens": 0, "model_calls": 1, "tool_calls": 0}),
+                       ("schema_version", True)]
+        for field, value in corruptions:
+            with self.subTest(field=field):
+                self.scribble_snapshot = copy.deepcopy(snapshot)
+                self.scribble_snapshot[field] = value
+                self.configs.clear()
+                response = self.execute(request, scribble_factory=self.scribble_factory)
+                self.assert_response(response, False)
+                self.assertEqual(self.configs, [])
+                self.assertEqual([call[0] for call in self.scribble_calls], ["checkpoint_context"])
+
+    def test_scribble_saved_research_usage_supports_aggregate_planner_tokens(self):
+        request = self.request(operation="scribble", input_paths=["source.md"], output_dir="built",
+                               research_limits={"max_queries": 3, "max_planner_calls": 2})
+        self.write("source.md", "Source text")
+        request["selector"]["deep_research"] = True
+        session = runtime._Session(request, self.provider_factory, None, None, None)
+        session.preflight()
+        session.usage.update(input_tokens=1200000000, output_tokens=1200000000, model_calls=2)
+        session.provenance = [{"call": 1, "purpose": "agent", "provider": "ollama", "model": "mock-model"}]
+        snapshot = session.scribble_checkpoint_snapshot("b" * 64)
+        restored = runtime._Session(request, self.provider_factory, None, None, None)
+        restored.preflight()
+        restored.restore_scribble_checkpoint(snapshot, "b" * 64, restored.scribble_config())
+        self.assertEqual(restored.usage["model_calls"], 0)
+        self.assertEqual(restored.usage["reused_research"]["input_tokens"], 1200000000)
+        self.assertEqual(restored.usage["reused_research"]["model_calls"], 2)
+        self.assertIs(restored.provenance[0]["checkpoint_reused"], True)
+        self.assertNotIn("checkpoint_reused", snapshot["provenance"][0])
+        self.assertEqual(self.configs, [])
+
+    def test_real_scribble_resume_retains_completed_chunks_and_research(self):
+        from workbench.services.scribbles import ScribbleBuilder
+        if not ScribbleBuilder.checkpoint_supported():
+            self.skipTest("Durable Scribble checkpoints require qualified POSIX operations")
+        self.write("source.md", "Synthetic expertise line.\n" * 12)
+        annotation = json.dumps({"moniker": "synthetic expertise", "keywords": ["expertise"],
+                                 "description": "Grounded fixture description.", "commentary": "",
+                                 "cross_reference_summary": "", "nuance": ""})
+        self.provider = RecordingProvider([{"text": annotation}] * 8)
+        request = self.request(operation="scribble", input_paths=["source.md"], output_dir="built",
+                               research_queries=["Directory creation errno"], scribble={"chunk_bytes": 128})
+        request["selector"]["deep_research"] = True
+        progress = []
+        def pause(value):
+            progress.append(value)
+            return not (value["phase"] == "enriching" and value["completed_chunks"] == 1)
+        paused = self.execute(request, research_factory=self.research_factory, on_progress=pause)
+        self.assert_response(paused, False)
+        self.assertIn("interrupted", paused["error"])
+        self.assertEqual(len(self.provider.calls), 1)
+        research_prefix = self.provider.calls[0]["messages"][1]
+        checkpoint_dirs = list(self.root.glob(".tinyenv-scribble-*.checkpoint"))
+        self.assertEqual(len(checkpoint_dirs), 1)
+        self.assertTrue((checkpoint_dirs[0] / "chunk-0000.json").is_file())
+        self.assertFalse((self.root / "built/scribbles.md").exists())
+        self.provider = RecordingProvider([{"text": annotation}] * 8)
+        request["scribble"]["resume"] = True
+        request["stream"] = True
+        progress.clear()
+        research = mock.Mock(side_effect=AssertionError("Resume replayed completed research"))
+        resumed = self.execute(request, research_factory=research, on_progress=progress.append)
+        self.assert_response(resumed, True)
+        research.assert_not_called()
+        evidence = resumed["scribble"]["evidence"]
+        self.assertEqual(evidence["chunk_count"], 3)
+        self.assertEqual(evidence["ai_calls"], 3)
+        self.assertEqual(len(self.provider.calls), 2)
+        self.assertEqual(len(evidence["provider_calls"]), 3)
+        self.assertEqual(resumed["usage"]["model_calls"], 2)
+        self.assertEqual(resumed["usage"]["reused_scribble"]["model_calls"], 1)
+        self.assertEqual(resumed["usage"]["reused_research"]["research"]["queries"], 1)
+        self.assertTrue(all(call["messages"][1] == research_prefix for call in self.provider.calls))
+        self.assertEqual(progress[-1], {"phase": "completed", "completed_chunks": 3,
+                                        "total_chunks": 3, "resumed_chunks": 1})
+        self.assertTrue((self.root / "built/scribbles.md").is_file())
+
+    def test_scribble_checkpoints_are_private_to_context_discovery_and_tools(self):
+        directory = self.root / (".tinyenv-scribble-" + "a" * 32 + ".checkpoint")
+        directory.mkdir()
+        (directory / "manifest.json").write_text('"CACHED PRIVATE RESEARCH PREFIX"', encoding="utf-8")
+        self.write("source.md", "Public source content")
+        request = self.request()
+        request["selector"]["refs"] = [{"path": ".", "enabled": True}]
+        self.assert_response(self.execute(request), True)
+        self.assertNotIn("CACHED PRIVATE RESEARCH PREFIX", json.dumps(self.provider.calls[0]["messages"]))
+        direct = self.request()
+        direct["selector"]["refs"] = [{"path": str(directory / "manifest.json"), "enabled": True}]
+        self.configs.clear()
+        response = self.execute(direct)
+        self.assert_response(response, False)
+        self.assertEqual(self.configs, [])
+        descriptor = self.write("tool.json", json.dumps({"tool": "read_file", "allowed_paths": [str(directory)]}))
+        direct = self.request()
+        direct["selector"]["tools"] = [{"path": str(descriptor), "enabled": True}]
+        self.assert_response(self.execute(direct), False)
+        self.assertEqual(self.configs, [])
 
     def test_scribble_research_supports_user_web_and_explicit_curated_qualification(self):
         self.write("source.md", "Source text")
@@ -2233,11 +2720,11 @@ class RuntimeTests(unittest.TestCase):
                 response = self.execute(self.request(stream=value), on_text=mock.Mock())
                 self.assert_response(response, False)
                 self.assertIn("boolean", response["error"])
-        for operation in runtime.OPERATIONS - {"chat", "agent"}:
+        for operation in runtime.OPERATIONS - {"chat", "agent", "scribble"}:
             with self.subTest(operation=operation):
                 response = self.execute(self.request(operation=operation, stream=True), on_text=mock.Mock())
                 self.assert_response(response, False)
-                self.assertIn("only for chat and agent", response["error"])
+                self.assertIn("only for chat, agent and scribble", response["error"])
         self.assertEqual(self.configs, [])
         self.assertEqual(self.provider.calls, [])
 
@@ -2281,6 +2768,57 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual([frame["replace"] for frame in frames[1:-1]], [False, True, False])
         self.assertEqual(frames[-1]["result"], response)
         self.assertNotIn("hidden service debug", output.getvalue())
+
+    def test_main_scribble_progress_stream_has_no_assistant_deltas(self):
+        request = self.request(operation="scribble", stream=True)
+        path = self.directory / "request.json"
+        path.write_text(json.dumps(request), encoding="utf-8")
+        output = io.StringIO()
+        response = {"schema_version": 1, "operation": "scribble", "ok": True,
+                    "text": "Built 2 chunks.", "error": ""}
+        def run(value, *, temporary_parent, credential_loader, on_progress):
+            self.assertEqual(value, request)
+            on_progress({"phase": "enriching", "completed_chunks": 1, "total_chunks": 2, "resumed_chunks": 1})
+            on_progress({"phase": "completed", "completed_chunks": 2, "total_chunks": 2, "resumed_chunks": 1})
+            return response
+        with mock.patch.object(runtime, "execute_request", side_effect=run), redirect_stdout(output):
+            self.assertEqual(main(["--request", str(path)]), 0)
+        frames = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual([frame["event"] for frame in frames], ["start", "progress", "progress", "final"])
+        self.assertEqual([frame["sequence"] for frame in frames], list(range(4)))
+        self.assertEqual(frames[-1]["result"], response)
+        self.assertNotIn("Built 2 chunks.", json.dumps(frames[1:-1]))
+
+    def test_scribble_stream_progress_coalesces_largest_chunk_count_then_completes(self):
+        output = io.StringIO()
+        stream = runtime._StreamWriter(output, "scribble")
+        for completed in range(4097):
+            self.assertTrue(stream.progress({"phase": "enriching", "completed_chunks": completed,
+                                             "total_chunks": 4096, "resumed_chunks": 0}))
+        stream.progress({"phase": "completed", "completed_chunks": 4096,
+                         "total_chunks": 4096, "resumed_chunks": 0})
+        stream.finish({"ok": True, "operation": "scribble", "text": "Saved artifacts."})
+        frames = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertLessEqual(len(frames) - 2, runtime.MAX_STREAM_DELTAS)
+        self.assertEqual(frames[-2]["phase"], "completed")
+        self.assertEqual(frames[-2]["completed_chunks"], 4096)
+        self.assertEqual([frame["sequence"] for frame in frames], list(range(len(frames))))
+        self.assertEqual(stream.text, "")
+        with self.assertRaises(RequestError):
+            stream.preview("Annotation text must not become an assistant delta")
+
+    def test_scribble_progress_rejects_unknown_fields_and_inconsistent_counts(self):
+        value = {"phase": "enriching", "completed_chunks": 1, "total_chunks": 2, "resumed_chunks": 0}
+        cases = [dict(value, completed_chunks=True), dict(value, completed_chunks=None),
+                 dict(value, total_chunks=0), dict(value, resumed_chunks=2), dict(value, total_chunks=4097),
+                 dict(value, phase=[]), dict(value, phase="unsafe"), dict(value, text="provider text")]
+        for invalid in cases:
+            with self.subTest(value=invalid):
+                output = io.StringIO()
+                stream = runtime._StreamWriter(output, "scribble")
+                with self.assertRaises(RequestError):
+                    stream.progress(invalid)
+                self.assertEqual(len(output.getvalue().splitlines()), 1)
 
     def test_stream_writer_splits_utf8_and_bounds_delta_count_then_final_reconciles(self):
         output = io.StringIO()

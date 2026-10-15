@@ -34,6 +34,13 @@ constexpr std::size_t field_bytes = 1024 * 1024;
 constexpr std::size_t list_entries = 4096;
 constexpr std::size_t submission_bytes = 64 * 1024;
 constexpr std::size_t history_bytes = 8 * 1024 * 1024;
+constexpr std::size_t builder_tasks = 32;
+constexpr std::size_t builder_request_bytes = 64 * 1024;
+constexpr std::size_t builder_result_bytes = 128 * 1024;
+constexpr std::size_t builder_bytes = 1024 * 1024;
+constexpr std::size_t builder_chunks = 4096;
+// JSON numbers are doubles; this bound keeps every persisted ID exact.
+constexpr std::uint64_t builder_next_id = 9007199254740991ULL;
 
 [[noreturn]] void invalid(std::string message) { throw FileError(FileFailure::invalid_path, std::move(message)); }
 void text_limit(std::string_view value, std::size_t limit, std::string_view field) {
@@ -362,7 +369,199 @@ void sources_valid(const Value& sources) {
         }
     }
 }
+void builder_keys(const Value& value, const std::set<std::string>& allowed, std::string_view name) {
+    for (const auto& [key, field] : value.object()) {
+        (void)field;
+        if (!allowed.contains(key)) invalid(std::string(name) + " contains an unsupported field: " + key);
+    }
+}
+std::uint64_t builder_integer(const Value& value, std::string_view key, std::uint64_t fallback, std::uint64_t maximum) {
+    const auto number = read_number(value, key, static_cast<double>(fallback));
+    if (!std::isfinite(number) || std::floor(number) != number || number < 0 || number > static_cast<double>(maximum))
+        throw FileError(FileFailure::limit, "Builder field " + std::string(key) + " must be a bounded nonnegative integer");
+    return static_cast<std::uint64_t>(number);
+}
+void builder_metadata(const Value& value) {
+    // Match secret-field normalization used by the worker. Reject executable
+    // capability envelopes at every nesting level, including result metadata.
+    if (const auto* object = std::get_if<Value::Object>(&value.data)) {
+        static const std::set<std::string> forbidden{
+            "apikey", "apikeys", "authorization", "credential", "credentials", "password", "secret", "secrets",
+            "accesstoken", "refreshtoken", "bearertoken", "token", "credentialdirectory", "headers", "cookie", "cookies", "privatekey",
+            "history", "images", "pseudocode", "nativeexec", "nativeexecution", "nativetools", "providertools",
+            "plugins", "servertools", "servicetools", "toolchoice", "executable", "command", "environment", "env"};
+        for (const auto& [key, field] : *object) {
+            text_limit(key, 128, "Builder JSON field name");
+            std::string normalized;
+            for (auto ch : key) {
+                if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch - 'A' + 'a');
+                if (ch != '_' && ch != '-' && ch != '.' && static_cast<unsigned char>(ch) > 0x20) normalized += ch;
+            }
+            if (forbidden.contains(normalized) || normalized.ends_with("apikey"))
+                invalid("Builder metadata cannot persist credentials, chat history or executable capabilities");
+            builder_metadata(field);
+        }
+    } else if (const auto* array = std::get_if<Value::Array>(&value.data)) {
+        for (const auto& field : *array) builder_metadata(field);
+    } else if (const auto* text = std::get_if<std::string>(&value.data)) {
+        text_limit(*text, builder_result_bytes, "Builder JSON text");
+    }
+}
+void builder_strings(const Value& value, std::size_t maximum, std::size_t bytes, std::string_view name) {
+    if (value.array().size() > maximum) throw FileError(FileFailure::limit, std::string(name) + " exceeds its entry limit");
+    for (const auto& field : value.array()) text_limit(field.string(), bytes, name);
+}
+using BuilderBounds = std::map<std::string, std::pair<std::uint64_t, std::uint64_t>>;
+void builder_numbers(const Value& value, const BuilderBounds& bounds, std::string_view name) {
+    for (const auto& [key, field] : value.object()) {
+        (void)field;
+        const auto limit = bounds.find(key);
+        if (limit == bounds.end()) invalid(std::string(name) + " contains an unsupported field: " + key);
+        if (builder_integer(value, key, 0, limit->second.second) < limit->second.first)
+            throw FileError(FileFailure::limit, std::string(name) + " contains an out-of-range field: " + key);
+    }
+}
+void builder_request(const Value& value, const BuilderTask& task) {
+    static const std::set<std::string> allowed{
+        "schema_version", "operation", "root", "chat_path", "prompt", "settings", "selector", "context_limits",
+        "research_limits", "research_source", "research_paths", "research_queries", "kiwix_index", "allowed_context_paths",
+        "input_paths", "output_dir", "scribble", "questions"};
+    builder_keys(value, allowed, "Builder request");
+    if (value.object().empty()) return; // A task may be prepared before launch.
+    if (read_string(value, "operation") != task.operation) invalid("Builder request operation does not match its task");
+    if (const auto* version = value.find("schema_version")) {
+        (void)version;
+        if (builder_integer(value, "schema_version", 0, 1) != 1) invalid("Unsupported builder request version");
+    }
+    for (const auto* name : {"root", "chat_path", "output_dir", "research_source", "kiwix_index"})
+        if (const auto* field = value.find(name)) text_limit(field->string(), 4096, "Builder request path or source");
+    if (const auto* prompt = value.find("prompt")) if (!prompt->string().empty()) invalid("Builder requests cannot persist a chat draft");
+    for (const auto* name : {"input_paths", "allowed_context_paths", "research_paths"})
+        if (const auto* field = value.find(name)) builder_strings(*field, 128, 4096, "Builder source path");
+    if (const auto* field = value.find("research_queries")) builder_strings(*field, 1000, 4096, "Builder research query");
+    if (const auto* field = value.find("questions")) builder_strings(*field, 16, 4096, "Builder evaluation question");
+    if (const auto* settings = value.find("settings")) {
+        auto ai = *settings; (void)ai.object();
+        for (const auto* name : {"network_enabled", "max_price_per_million"}) ai.object().erase(name);
+        const auto saved_ai = read_ai_settings(ai, true);
+        auto endpoint = saved_ai.endpoint;
+        while (endpoint.ends_with('/')) endpoint.pop_back();
+        if (!saved_ai.endpoint.empty() && endpoint != "https://openrouter.ai/api/v1")
+            invalid("Builder settings require the fixed credential-free OpenRouter endpoint");
+        if (const auto* network = settings->find("network_enabled")) (void)network->boolean();
+        if (const auto* price = settings->find("max_price_per_million")) {
+            if (!std::isfinite(price->number()) || price->number() <= 0 || price->number() > 20)
+                throw FileError(FileFailure::limit, "Builder price ceiling is out of range");
+        }
+    }
+    if (const auto* selector = value.find("selector")) {
+        builder_keys(*selector, {"deep_research", "calculations", "scribbles", "refs", "tools"}, "Builder selector");
+        (void)read_bool(*selector, "deep_research");
+        if (read_bool(*selector, "calculations")) invalid("Builder tasks cannot enable calculations");
+        for (const auto* name : {"scribbles", "refs", "tools"})
+            if (const auto* field = selector->find(name)) if (!field->array().empty()) invalid("Builder tasks require explicit inputs without chat context or tools");
+    }
+    if (const auto* limits = value.find("context_limits"))
+        builder_numbers(*limits, {{"max_total_bytes", {1, 16 * 1024 * 1024}}, {"max_file_bytes", {1, 4 * 1024 * 1024}},
+            {"max_files", {1, 128}}, {"max_artifact_bytes", {1, 256 * 1024 * 1024}}}, "Builder context limits");
+    if (const auto* limits = value.find("research_limits"))
+        builder_numbers(*limits, {{"max_queries", {1, 1000}}, {"max_results", {1, 3000}}, {"max_context_bytes", {1, 16 * 1024 * 1024}},
+            {"max_planner_calls", {0, 1000}}, {"max_context_chars", {1, 16 * 1024 * 1024}}, {"max_excerpt_chars", {1, 524288}}}, "Builder research limits");
+    if (const auto* scribble = value.find("scribble")) {
+        builder_keys(*scribble, {"label", "ai_enabled", "resume", "chunk_bytes", "max_file_bytes", "max_total_bytes", "max_files", "max_chunks",
+            "keyword_limit", "max_scan_entries", "max_context_chars", "max_response_chars", "max_evaluation_questions", "max_provider_calls", "max_directory_depth"}, "Builder Scribble settings");
+        auto numbers = *scribble;
+        for (const auto& [key, field] : scribble->object()) {
+            if (key == "label") text_limit(field.string(), 256, "Builder label");
+            else if (key == "ai_enabled" || key == "resume") (void)field.boolean();
+        }
+        for (const auto* key : {"label", "ai_enabled", "resume"}) numbers.object().erase(key);
+        builder_numbers(numbers, {{"chunk_bytes", {128, 4 * 1024 * 1024}}, {"max_file_bytes", {1, 4 * 1024 * 1024}},
+            {"max_total_bytes", {1, 16 * 1024 * 1024}}, {"max_files", {1, 128}}, {"max_chunks", {1, 4096}}, {"keyword_limit", {1, 128}},
+            {"max_scan_entries", {1, 4096}}, {"max_context_chars", {1, 1048576}}, {"max_response_chars", {1, 65536}},
+            {"max_evaluation_questions", {1, 32}}, {"max_provider_calls", {1, 4096}}, {"max_directory_depth", {1, 64}}}, "Builder Scribble limits");
+    }
+}
+void builder_result(const Value& value, const BuilderTask& task) {
+    builder_keys(value, {"schema_version", "operation", "ok", "text", "sources", "provenance", "events", "usage", "error", "error_code", "scribble", "evaluation", "omitted"}, "Builder result");
+    if (const auto* operation = value.find("operation")) if (operation->string() != task.operation) invalid("Builder result operation does not match its task");
+    if (const auto* version = value.find("schema_version")) {
+        (void)version;
+        if (builder_integer(value, "schema_version", 0, 1) != 1) invalid("Unsupported builder result version");
+    }
+    for (const auto* name : {"ok", "omitted"}) if (const auto* field = value.find(name)) (void)field->boolean();
+    for (const auto* name : {"text", "error", "error_code"}) if (const auto* field = value.find(name)) text_limit(field->string(), builder_result_bytes, "Builder result text");
+    for (const auto* name : {"sources", "provenance", "events"}) if (const auto* field = value.find(name)) (void)field->array();
+    for (const auto* name : {"usage", "scribble", "evaluation"}) if (const auto* field = value.find(name)) (void)field->object();
+}
+Value builder_json(const BuilderState& builder) {
+    Value::Object fields; for (const auto& [key, value] : builder.fields) fields.emplace(key, value);
+    Value::Array tasks;
+    for (const auto& task : builder.tasks) tasks.emplace_back(Value::Object{
+        {"id", task.id}, {"operation", task.operation}, {"status", task.status}, {"label", task.label},
+        {"request_json", task.request_json}, {"result_json", task.result_json}, {"error", task.error}, {"phase", task.phase},
+        {"completed_chunks", task.completed_chunks}, {"total_chunks", task.total_chunks}, {"resumed_chunks", task.resumed_chunks}});
+    return Value::Object{{"active", builder.active}, {"tab", builder.tab}, {"selected_task", builder.selected_task},
+        {"fields", std::move(fields)}, {"tasks", std::move(tasks)}, {"next_task_id", static_cast<double>(builder.next_task_id)}};
+}
+void builder_valid(const BuilderState& builder) {
+    if (builder.tab != "Setup" && builder.tab != "Tasks" && builder.tab != "Results") invalid("Unknown builder tab");
+    text_limit(builder.selected_task, 128, "Selected builder task");
+    if (!builder.next_task_id || builder.next_task_id > builder_next_id) throw FileError(FileFailure::limit, "Builder next task ID is out of range");
+    static const std::set<std::string> fields{"builder.paths", "builder.kind", "builder.output", "builder.default_output", "builder.label", "builder.model",
+        "builder.model_choice", "builder.small_model", "builder.ai", "builder.web", "builder.evaluation", "builder.kimi_ceiling", "builder.max_calls", "builder.questions"};
+    for (const auto& [key, value] : builder.fields) {
+        if (!fields.contains(key)) invalid("Unsupported builder setup field: " + key);
+        text_limit(value, key == "builder.paths" || key == "builder.questions" ? 64 * 1024 : 4096, "Builder setup field");
+    }
+    if (builder.tasks.size() > builder_tasks) throw FileError(FileFailure::limit, "Builder task history exceeds 32 records");
+    static const std::set<std::string> statuses{"ready", "running", "paused", "interrupted", "completed", "failed", "cancelled"};
+    std::set<std::string> ids;
+    for (const auto& task : builder.tasks) {
+        text_limit(task.id, 128, "Builder task ID");
+        if (task.id.empty() || task.id.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.") != std::string::npos || !ids.insert(task.id).second)
+            invalid("Builder task IDs must be nonempty, unique identifiers");
+        if (task.operation != "scribble" && task.operation != "evaluate") invalid("Unsupported builder task operation");
+        if (!statuses.contains(task.status)) invalid("Unsupported builder task status");
+        text_limit(task.label, 4096, "Builder task label"); text_limit(task.error, 4096, "Builder task error"); text_limit(task.phase, 128, "Builder task phase");
+        if (task.total_chunks > builder_chunks || task.completed_chunks > task.total_chunks || task.resumed_chunks > task.completed_chunks)
+            throw FileError(FileFailure::limit, "Builder chunk counts are inconsistent or exceed 4096 chunks");
+        text_limit(task.request_json, builder_request_bytes, "Builder request metadata"); text_limit(task.result_json, builder_result_bytes, "Builder result metadata");
+        const auto request = json::parse(task.request_json, builder_request_bytes, 32, 10000);
+        const auto result = json::parse(task.result_json, builder_result_bytes, 32, 20000);
+        builder_metadata(request); builder_metadata(result); builder_request(request, task); builder_result(result, task);
+    }
+    if (!builder.selected_task.empty() && !ids.contains(builder.selected_task)) invalid("Selected builder task does not exist");
+    (void)json::stringify(builder_json(builder), builder_bytes);
+}
+BuilderState read_builder(const Value& value) {
+    builder_keys(value, {"active", "tab", "selected_task", "fields", "tasks", "next_task_id"}, "Builder state");
+    BuilderState builder;
+    builder.active = read_bool(value, "active"); builder.tab = read_string(value, "tab", builder.tab);
+    builder.selected_task = read_string(value, "selected_task");
+    builder.next_task_id = builder_integer(value, "next_task_id", 1, builder_next_id);
+    if (const auto* fields = value.find("fields")) for (const auto& [key, field] : fields->object()) builder.fields.emplace(key, field.string());
+    if (const auto* tasks = value.find("tasks")) {
+        if (tasks->array().size() > builder_tasks) throw FileError(FileFailure::limit, "Builder task history exceeds 32 records");
+        for (const auto& saved : tasks->array()) {
+            builder_keys(saved, {"id", "operation", "status", "label", "request_json", "result_json", "error", "phase", "completed_chunks", "total_chunks", "resumed_chunks"}, "Builder task");
+            for (const auto* name : {"id", "operation", "status", "request_json", "result_json"})
+                if (!saved.find(name)) invalid("Incomplete builder task record");
+            BuilderTask task;
+            task.id = read_string(saved, "id"); task.operation = read_string(saved, "operation"); task.status = read_string(saved, "status");
+            task.label = read_string(saved, "label"); task.request_json = read_string(saved, "request_json"); task.result_json = read_string(saved, "result_json");
+            task.error = read_string(saved, "error"); task.phase = read_string(saved, "phase");
+            task.completed_chunks = static_cast<std::size_t>(builder_integer(saved, "completed_chunks", 0, builder_chunks));
+            task.total_chunks = static_cast<std::size_t>(builder_integer(saved, "total_chunks", 0, builder_chunks));
+            task.resumed_chunks = static_cast<std::size_t>(builder_integer(saved, "resumed_chunks", 0, builder_chunks));
+            builder.tasks.push_back(std::move(task));
+        }
+    }
+    builder_valid(builder);
+    return builder;
+}
 void state_valid(const ChatState& state, const ProjectFiles& files) {
+    validate_builder_state(state.builder);
     if (state.submission) submission_valid(*state.submission);
     images_valid(state.draft_images);
     text_limit(state.draft, field_bytes, "Draft"); text_limit(state.pseudocode, field_bytes, "Pseudocode");
@@ -424,12 +623,13 @@ Value state_json(const ChatState& state) {
         {"sources", json::parse(state.sources_json, field_bytes)},
         {"left_tab", state.left_tab}, {"center_tab", state.center_tab}, {"right_tab", state.right_tab},
         {"agentic", state.agentic}, {"split_chat", state.split_chat},
-        {"selector", Value::Object{{"deep_research", state.selector.deep_research}, {"scribbles", toggles_json(state.selector.scribbles)},
+        {"selector", Value::Object{{"deep_research", state.selector.deep_research}, {"calculations", state.selector.calculations}, {"scribbles", toggles_json(state.selector.scribbles)},
             {"refs", toggles_json(state.selector.refs)}, {"tools", toggles_json(state.selector.tools)},
             {"research_max_queries", state.selector.research_max_queries}, {"research_max_results", state.selector.research_max_results},
             {"research_source", state.selector.research_source}, {"kiwix_index", state.selector.kiwix_index}, {"context_max_kib", state.selector.context_max_kib}}},
         {"ai_configured", state.ai_configured}, {"ai", ai_settings_json(state.ai)}
     };
+    if (state.builder != BuilderState{}) result["builder"] = builder_json(state.builder);
     if (!state.draft_images.empty()) result["draft_images"] = images_json(state.draft_images);
     if (state.submission) {
         const auto& value = *state.submission;
@@ -443,6 +643,7 @@ ChatState read_state(std::string_view bytes) {
     const auto value = json::parse(bytes); (void)value.object();
     if (read_integer(value, "version", 0) != 1) throw std::runtime_error("Unsupported chat state version");
     ChatState state;
+    if (const auto* builder = value.find("builder")) state.builder = read_builder(*builder);
     if (const auto* images = value.find("draft_images")) state.draft_images = read_images(*images);
     if (const auto* saved = value.find("submission")) {
         static const std::set<std::string> names{"prompt", "agentic", "history_bytes", "history_sha256", "images"};
@@ -463,6 +664,7 @@ ChatState read_state(std::string_view bytes) {
     state.right_tab = read_string(value, "right_tab", state.right_tab); state.agentic = read_bool(value, "agentic"); state.split_chat = read_bool(value, "split_chat");
     if (const auto* selector = value.find("selector")) {
         (void)selector->object(); state.selector.deep_research = read_bool(*selector, "deep_research");
+        state.selector.calculations = read_bool(*selector, "calculations");
         state.selector.scribbles = read_toggles(*selector, "scribbles"); state.selector.refs = read_toggles(*selector, "refs"); state.selector.tools = read_toggles(*selector, "tools");
         // Old states with an empty selector object used the previous curated
         // defaults. New states always write their selected source and budgets.
@@ -500,6 +702,8 @@ void snippets_valid(const std::vector<Snippet>& snippets) {
     }
 }
 } // namespace
+
+void validate_builder_state(const BuilderState& builder) { builder_valid(builder); }
 
 SubmittedMessage make_submission(std::string_view prompt, bool agentic, std::string_view history, const std::vector<ImageAttachment>& images) {
     text_limit(history, history_bytes, "Previous message history");

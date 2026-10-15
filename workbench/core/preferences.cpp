@@ -202,7 +202,7 @@ AiPreferences::AiPreferences(std::filesystem::path config_directory)
     if (version != 1 && version != 2) throw std::runtime_error("Unsupported AI defaults version");
     for (const auto& [key, unused] : value.object()) {
         (void)unused;
-        if (key != "version" && key != "ai" && !(version == 2 && (key == "configured_models" || key == "tutorial_mode" || key == "developer_mode" || key == "openrouter_guardrail_id")))
+        if (key != "version" && key != "ai" && !(version == 2 && (key == "configured_models" || key == "tutorial_mode" || key == "developer_mode" || key == "right_sidebar_visible" || key == "openrouter_guardrail_id")))
             invalid("Unsupported AI defaults document field: " + key);
     }
     const auto* ai = value.find("ai");
@@ -218,36 +218,42 @@ AiPreferences::AiPreferences(std::filesystem::path config_directory)
         configured_models_ = read_models(*models);
         tutorial_mode_ = read_bool(value, "tutorial_mode");
         developer_mode_ = read_bool(value, "developer_mode");
+        right_sidebar_visible_ = read_bool(value, "right_sidebar_visible", true);
         openrouter_guardrail_id_ = read_string(value, "openrouter_guardrail_id");
         guardrail_id_valid(openrouter_guardrail_id_);
     }
 }
 
 void AiPreferences::save(const AiSettings& settings) {
-    save_document(settings, configured_models_, tutorial_mode_, openrouter_guardrail_id_, developer_mode_);
+    save_document(settings, configured_models_, tutorial_mode_, openrouter_guardrail_id_, developer_mode_, right_sidebar_visible_);
 }
 
 void AiPreferences::save_configured_models(const std::vector<ConfiguredModel>& models) {
     auto normalized = normalized_models(models);
-    save_document(defaults_, std::move(normalized), tutorial_mode_, openrouter_guardrail_id_, developer_mode_);
+    save_document(defaults_, std::move(normalized), tutorial_mode_, openrouter_guardrail_id_, developer_mode_, right_sidebar_visible_);
 }
 
 void AiPreferences::set_tutorial_mode(bool enabled) {
-    save_document(defaults_, configured_models_, enabled, openrouter_guardrail_id_, developer_mode_);
+    save_document(defaults_, configured_models_, enabled, openrouter_guardrail_id_, developer_mode_, right_sidebar_visible_);
 }
 
 void AiPreferences::set_developer_mode(bool enabled) {
-    save_document(defaults_, configured_models_, tutorial_mode_, openrouter_guardrail_id_, enabled);
+    save_document(defaults_, configured_models_, tutorial_mode_, openrouter_guardrail_id_, enabled, right_sidebar_visible_);
+}
+
+void AiPreferences::set_right_sidebar_visible(bool visible) {
+    save_document(defaults_, configured_models_, tutorial_mode_, openrouter_guardrail_id_, developer_mode_, visible);
 }
 
 void AiPreferences::save_guardrail_id(std::string id) {
-    save_document(defaults_, configured_models_, tutorial_mode_, std::move(id), developer_mode_);
+    save_document(defaults_, configured_models_, tutorial_mode_, std::move(id), developer_mode_, right_sidebar_visible_);
 }
 
-void AiPreferences::save_document(std::optional<AiSettings> defaults, std::vector<ConfiguredModel> models, bool tutorial_mode, std::string guardrail_id, bool developer_mode) {
+void AiPreferences::save_document(std::optional<AiSettings> defaults, std::vector<ConfiguredModel> models, bool tutorial_mode, std::string guardrail_id, bool developer_mode, bool right_sidebar_visible) {
     guardrail_id_valid(guardrail_id);
     models = normalized_models(std::move(models));
-    Value::Object document{{"version", 2}, {"configured_models", models_json(models)}, {"tutorial_mode", tutorial_mode}, {"developer_mode", developer_mode}, {"openrouter_guardrail_id", guardrail_id}};
+    Value::Object document{{"version", 2}, {"configured_models", models_json(models)}, {"tutorial_mode", tutorial_mode}, {"developer_mode", developer_mode},
+        {"right_sidebar_visible", right_sidebar_visible}, {"openrouter_guardrail_id", guardrail_id}};
     if (defaults) document["ai"] = ai_settings_json(*defaults);
     // Count/string bounds above keep serialization bounded, including escaped
     // bytes. Check the complete document before any directory or file write.
@@ -259,6 +265,7 @@ void AiPreferences::save_document(std::optional<AiSettings> defaults, std::vecto
     configured_models_ = std::move(models);
     tutorial_mode_ = tutorial_mode;
     developer_mode_ = developer_mode;
+    right_sidebar_visible_ = right_sidebar_visible;
     openrouter_guardrail_id_ = std::move(guardrail_id);
 }
 

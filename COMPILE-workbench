@@ -43,6 +43,26 @@ and survives restart. Image Retry resends the original managed snapshots. It
 never infers a retry from chat Markdown or reruns automatically. Editing the
 original message or its preceding history invalidates Retry. Send/Retry use visible AI fields without Apply; a missing or
 invalid model opens AI, preserves the draft and starts no task.
+The bottom-bar Sidebar checkbox starts on and persists across projects/restarts.
+It stays reachable when the right pane is hidden; hiding expands the center and
+showing restores the selected right tab and its fields/scroll position.
+Send/Retry validation needing AI settings reveals the sidebar at AI's controls.
+Selector's Code checkbox starts off and is saved independently per chat.
+The selector.calculations boolean and calculate tool name remain compatible.
+It permits a bounded numeric AST interpreter during Chat/Agentic replies:
+arithmetic/math, numeric lists, scalar indexed writes, read-only slices,
+nonrecursive functions, bounded loops and integer bit operations in Python-shaped
+syntax. It can support information calculations, basic numeric vision, signal
+filters and QR algorithms from scratch within its budgets; no QR library is loaded.
+Optional data accepts only bounded finite numeric/boolean nested lists. Pixels
+must already be explicit numeric arrays; there is no PNG/JPEG decoding, file or
+metadata access, or automatic access to composer attachments. Program quotes and
+backslashes are rejected even in comments; there are no strings or escape decoders.
+It has no imports/files/network/shell or general Python execution, and is not an
+OS sandbox. Each call is capped at 32 KiB ASCII source, 2,000,000 operations,
+200,000 total loop iterations, 65,536 items per list/tuple and 64 KiB JSON output,
+with additional syntax, storage and numeric limits in docs/workbench.md.
+It never executes through Scribble/evaluation or from a displayed code fence alone.
 Attach image beside the composer asks for one absolute or project-relative
 PNG/JPEG path; selecting an image in Files also offers Attach image to message.
 Pending images show a filename/byte count and Remove. Limits are four images,
@@ -119,8 +139,57 @@ Automated checks use only local fixtures; live provider and curated-search check
 are manual and tightly bounded.
 AI Apply remembers defaults across projects and restarts. A fresh unconfigured
 chat has a blank model unless the user has saved defaults. Existing settings
-are preserved. Builder large/small model fields also start blank; reviewed
-profiles and examples remain explicit choices.
+are preserved. Builder annotation/evaluation model fields also start blank;
+reviewed profiles and examples remain explicit choices.
+Open Build Scribble / Ref… in Selector, Files or a file/folder's right-click
+actions after opening a chat. It opens the full Scribble builder workspace with
+Setup, Tasks and Results tabs. Selector initially supplies the project root;
+Files/actions initially supply the selected path or current directory. Reentry
+restores the chat's saved setup, tab and selection. Exit Scribble builder returns
+to the normal workbench; running work continues and drafts/setup/tasks remain.
+Escape neither leaves builder mode nor cancels work. New task explicitly resets
+setup while retaining previous records and initially seeds its source from Files
+or the current browsed directory. Each chat retains up to 32 task records
+and runs one worker at a time; there is no automatic queue or launch on restart.
+Running records become interrupted after application shutdown/restart.
+In Tasks, Pause stops a Scribble build and Resume Scribble explicitly continues
+its saved request on supported POSIX hosts. Resume verifies the original root,
+chat, sources, settings and checkpoint; it refuses changed or missing data
+without starting a fresh build. An interrupted unsaved provider call may repeat.
+Start saved Scribble explicitly starts a retained task whose launch did not
+start. Failure before the first manifest may need New task with a fresh output.
+Remove record is available only for nonrunning records and preserves generated
+outputs/checkpoints. Results offers View generated Scribble, Use as Scribble and
+Use as Ref; the Use actions add and enable the output DIRECTORY in Selector.
+The builder starts with Local source index · no AI or network. Build local index
+preserves source anchors and local keywords without models, credentials or
+network requests. Explicitly select AI annotations · OpenRouter for AI settings;
+enter an ID or choose a compatible configured model. Built-in model examples
+appear only with Tutorial and are not defaults or availability claims. OpenAI
+models cannot build or evaluate Scribbles. Evaluation is a separate opt-in with
+an explicit model and Evaluate existing action, even from local mode; it uses
+the saved index/questions without research. Cancel evaluation stops it; Retry
+evaluation explicitly starts a new task with new provider calls. Evaluation has
+no resumable pair checkpoint. AI Build can opt into Limited research for Build
+using Selector's research source. Resume reuses saved research without new
+searches. Ordinary chat context and Tools selections are not automatically added
+as builder inputs.
+Use a fresh output directory inside the project: scribbles.md, index.json and
+evidence.json are never overwritten by a new build. POSIX builds retain a hidden
+sibling .tinyenv-scribble-<digest>.checkpoint with immutable source/config/provider
+bindings and incremental completed annotations. Resume reuses only durably saved
+chunks and can finish its own verified partial final publication. Checkpoints
+remain after success or Remove record. Windows fresh builds remain available
+without checkpoints, while Resume is unavailable there; macOS desktop workers
+remain unavailable. The configured call budget must fit the planned build and
+is fixed for Resume. It caps each explicit Build/Resume invocation, not lifetime
+attempts; usage counts new work and reports reused research/annotations separately.
+Add and enable the output DIRECTORY in Selector's Scribbles or Refs list to use
+the verified index; the Markdown file alone loads raw text. Scribble progress
+streams as typed phase/chunk updates in the builder workspace, separately from
+chat answer text; final result metadata remains authoritative. Runtime requests
+may set scribble.resume:true (strict JSON boolean) and stream:true explicitly;
+evaluation remains buffered. Legacy single-JSON workers remain accepted.
 Blank routes for custom OpenRouter models use deepinfra,together,mistral;
 known profiles retain their exact tags and explicit allowlists remain in effect.
 Requests use data_collection:deny, allow_fallbacks:false and require_parameters:true

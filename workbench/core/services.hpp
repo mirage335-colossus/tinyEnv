@@ -25,6 +25,10 @@ struct JobStatus {
     std::string partial_text;
     bool streaming{};
     std::size_t stream_revision{};
+    // Scribble building reports phase/count progress independently of replies.
+    // These appended fields preserve legacy aggregate initialization.
+    std::string progress_phase{};
+    std::size_t completed_chunks{}, total_chunks{}, resumed_chunks{}, progress_revision{};
     [[nodiscard]] bool finished() const noexcept {
         return state != ServiceState::idle && state != ServiceState::running;
     }
@@ -35,7 +39,7 @@ struct JobStatus {
 // polling do not contact providers or execute project scripts. The optional
 // absolute credential_directory is trusted application startup configuration;
 // only its path is passed separately to the worker, never key bytes.
-// Chat/agent requests may explicitly set stream:true. Version-1 NDJSON progress
+// Chat/agent/Scribble requests may explicitly set stream:true. Version-1 NDJSON progress
 // is parsed incrementally with bounded frames, text and wire bytes; the legacy
 // single-JSON response remains supported. Invalid progress stops/joins the
 // worker and retains only the previously validated assistant preview.

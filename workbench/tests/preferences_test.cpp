@@ -42,7 +42,7 @@ int main() {
         // Every preferences instance has an explicit local fixture path. None
         // resolves, creates, or changes the actual user's home/config files.
         AiPreferences preferences(config);
-        check(!preferences.defaults() && preferences.configured_models().empty() && !preferences.tutorial_mode() && !preferences.developer_mode() && preferences.openrouter_guardrail_id().empty() &&
+        check(!preferences.defaults() && preferences.configured_models().empty() && !preferences.tutorial_mode() && !preferences.developer_mode() && preferences.right_sidebar_visible() && preferences.openrouter_guardrail_id().empty() &&
             !std::filesystem::exists(config.parent_path()), "Reading absent preferences changed defaults or created files");
         ChatState builtin; preferences.inherit(builtin);
         check(builtin.ai == AiSettings{} && builtin.ai.model.empty() && !builtin.ai_configured && !std::filesystem::exists(config.parent_path()),
@@ -78,8 +78,18 @@ int main() {
         std::filesystem::create_directory(minimal_config);
         raw_write(minimal_config / "ai-defaults.json", "{\"version\":2,\"configured_models\":[]}\n");
         AiPreferences minimal(minimal_config);
-        check(!minimal.defaults() && minimal.configured_models().empty() && !minimal.tutorial_mode() && !minimal.developer_mode() && minimal.openrouter_guardrail_id().empty(),
-            "Missing optional application preferences did not use absent/false/blank defaults");
+        check(!minimal.defaults() && minimal.configured_models().empty() && !minimal.tutorial_mode() && !minimal.developer_mode() && minimal.right_sidebar_visible() && minimal.openrouter_guardrail_id().empty(),
+            "Missing optional application preferences did not use their defaults");
+        const auto sidebar_config = root / "sidebar-config";
+        AiPreferences sidebar(sidebar_config); sidebar.set_right_sidebar_visible(false);
+        AiPreferences sidebar_restarted(sidebar_config);
+        const auto sidebar_document = json::parse(raw_read(sidebar_config / "ai-defaults.json"));
+        check(!sidebar_restarted.right_sidebar_visible() && !sidebar_restarted.defaults() && sidebar_restarted.configured_models().empty() &&
+            !sidebar_restarted.tutorial_mode() && !sidebar_restarted.developer_mode() && sidebar_restarted.openrouter_guardrail_id().empty() &&
+            sidebar_document.find("version")->number() == 2 && !sidebar_document.find("right_sidebar_visible")->boolean() && !sidebar_document.find("ai"),
+            "Hiding the sidebar before AI configuration changed independent settings or did not persist");
+        sidebar_restarted.set_right_sidebar_visible(true);
+        check(AiPreferences(sidebar_config).right_sidebar_visible(), "Showing the sidebar did not persist after restart");
 
         // Registry and application controls work before selecting active AI
         // settings. They share one checked document but preserve each other.
@@ -93,19 +103,21 @@ int main() {
         check(!json::parse(raw_read(catalog_config / "ai-defaults.json")).find("ai"), "List-only preference save serialized active AI defaults");
         AiPreferences catalog_restarted(catalog_config);
         check(!catalog_restarted.defaults() && catalog_restarted.configured_models() == normalized, "List-only preferences did not survive restart");
+        catalog_restarted.set_right_sidebar_visible(false);
         catalog_restarted.set_tutorial_mode(true); catalog_restarted.save_guardrail_id("guardrail_fixture-123");
         catalog_restarted.set_developer_mode(true);
-        check(!catalog_restarted.defaults() && catalog_restarted.configured_models() == normalized, "Saving application controls created active AI defaults");
+        check(!catalog_restarted.defaults() && catalog_restarted.configured_models() == normalized && !catalog_restarted.right_sidebar_visible(),
+            "Saving application controls changed AI defaults, models or sidebar visibility");
         AiSettings catalog_default; catalog_default.model = "active-model"; catalog_default.num_keep = 0;
         catalog_restarted.save(catalog_default);
         check(catalog_restarted.defaults() == catalog_default && catalog_restarted.configured_models() == normalized && catalog_restarted.tutorial_mode() && catalog_restarted.developer_mode() &&
-            catalog_restarted.openrouter_guardrail_id() == "guardrail_fixture-123", "Saving AI defaults replaced independent preferences");
+            !catalog_restarted.right_sidebar_visible() && catalog_restarted.openrouter_guardrail_id() == "guardrail_fixture-123", "Saving AI defaults replaced independent preferences");
         catalog_restarted.save_configured_models({normalized.front()});
         check(catalog_restarted.defaults() == catalog_default && catalog_restarted.configured_models() == std::vector<ConfiguredModel>{normalized.front()} &&
-            catalog_restarted.tutorial_mode() && catalog_restarted.developer_mode() && catalog_restarted.openrouter_guardrail_id() == "guardrail_fixture-123", "Removing models changed active defaults or application controls");
+            catalog_restarted.tutorial_mode() && catalog_restarted.developer_mode() && !catalog_restarted.right_sidebar_visible() && catalog_restarted.openrouter_guardrail_id() == "guardrail_fixture-123", "Removing models changed active defaults or application controls");
         AiPreferences catalog_later(catalog_config);
         check(catalog_later.defaults() == catalog_default && catalog_later.configured_models() == catalog_restarted.configured_models() && catalog_later.tutorial_mode() && catalog_later.developer_mode() &&
-            catalog_later.openrouter_guardrail_id() == "guardrail_fixture-123", "Independent preferences did not roundtrip");
+            !catalog_later.right_sidebar_visible() && catalog_later.openrouter_guardrail_id() == "guardrail_fixture-123", "Independent preferences did not roundtrip");
         const auto catalog_known = raw_read(catalog_config / "ai-defaults.json");
         auto duplicate = normalized.front(); duplicate.label = "Another label";
         fails(FileFailure::invalid_path, [&] { catalog_later.save_configured_models({normalized.front(), duplicate}); });
@@ -119,7 +131,7 @@ int main() {
         for (const auto* bad_id : {"../other", "id?token=value", "has space", "https://other.invalid/id"})
             fails(FileFailure::invalid_path, [&] { catalog_later.save_guardrail_id(bad_id); });
         fails(FileFailure::limit, [&] { catalog_later.save_guardrail_id(std::string(129, 'x')); });
-        check(raw_read(catalog_config / "ai-defaults.json") == catalog_known && catalog_later.defaults() == catalog_default && catalog_later.tutorial_mode() &&
+        check(raw_read(catalog_config / "ai-defaults.json") == catalog_known && catalog_later.defaults() == catalog_default && catalog_later.tutorial_mode() && !catalog_later.right_sidebar_visible() &&
             catalog_later.openrouter_guardrail_id() == "guardrail_fixture-123", "Rejected registry/guardrail save changed preferences");
         // Stale no-op saves still check ownership; desired equality is no excuse
         // to overwrite a different writer's settings.
@@ -128,23 +140,37 @@ int main() {
         fails(FileFailure::conflict, [&] { catalog_later.save_configured_models(catalog_later.configured_models()); });
         fails(FileFailure::conflict, [&] { catalog_later.set_tutorial_mode(true); });
         fails(FileFailure::conflict, [&] { catalog_later.set_developer_mode(false); });
+        fails(FileFailure::conflict, [&] { catalog_later.set_right_sidebar_visible(false); });
+        fails(FileFailure::conflict, [&] { catalog_later.set_right_sidebar_visible(true); });
+        fails(FileFailure::conflict, [&] { catalog_later.save(catalog_default); });
         fails(FileFailure::conflict, [&] { catalog_later.save_guardrail_id("different_id"); });
-        check(raw_read(catalog_config / "ai-defaults.json") == foreign_catalog && catalog_later.tutorial_mode() && catalog_later.developer_mode() &&
+        check(raw_read(catalog_config / "ai-defaults.json") == foreign_catalog && catalog_later.tutorial_mode() && catalog_later.developer_mode() && !catalog_later.right_sidebar_visible() &&
             catalog_later.openrouter_guardrail_id() == "guardrail_fixture-123", "Conflicting independent save overwrote stored or loaded preferences");
         catalog_restarted.save_guardrail_id(""); catalog_restarted.save_configured_models({});
         AiPreferences cleared(catalog_config);
-        check(cleared.configured_models().empty() && cleared.openrouter_guardrail_id().empty() && !cleared.tutorial_mode() && cleared.developer_mode() && cleared.defaults() == catalog_default,
+        check(cleared.configured_models().empty() && cleared.openrouter_guardrail_id().empty() && !cleared.tutorial_mode() && cleared.developer_mode() && !cleared.right_sidebar_visible() && cleared.defaults() == catalog_default,
             "Clearing models or guardrail ID changed active AI settings");
         cleared.set_developer_mode(false);
         AiPreferences ordinary(catalog_config);
-        check(!ordinary.developer_mode() && !ordinary.tutorial_mode() && ordinary.defaults() == catalog_default,
+        check(!ordinary.developer_mode() && !ordinary.tutorial_mode() && !ordinary.right_sidebar_visible() && ordinary.defaults() == catalog_default,
             "Disabling Developer did not persist independently");
+        ordinary.set_right_sidebar_visible(true);
+        AiPreferences visible_again(catalog_config);
+        check(visible_again.right_sidebar_visible() && !visible_again.developer_mode() && !visible_again.tutorial_mode() &&
+            visible_again.defaults() == catalog_default && visible_again.configured_models().empty() && visible_again.openrouter_guardrail_id().empty(),
+            "Showing the sidebar changed independent application preferences");
         for (const auto* value : {"null", "1", "\"true\"", "[]"}) {
             const auto bytes = std::string("{\"version\":2,\"configured_models\":[],\"developer_mode\":") + value + "}";
             raw_write(minimal_config / "ai-defaults.json", bytes);
             malformed([&] { AiPreferences invalid_mode(minimal_config); });
             check(raw_read(minimal_config / "ai-defaults.json") == bytes,
                 "Malformed Developer mode was silently replaced");
+        }
+        for (const auto* value : {"null", "0", "1", "\"false\"", "[]", "{}"}) {
+            const auto bytes = std::string("{\"version\":2,\"configured_models\":[],\"right_sidebar_visible\":") + value + "}";
+            raw_write(minimal_config / "ai-defaults.json", bytes);
+            malformed([&] { AiPreferences invalid_sidebar(minimal_config); });
+            check(raw_read(minimal_config / "ai-defaults.json") == bytes, "Malformed sidebar visibility was silently replaced");
         }
 
         const auto legacy_config = root / "legacy-config";
@@ -155,9 +181,9 @@ int main() {
         check(migrated.defaults()->num_predict == -1 && migrated.defaults()->num_keep == 0 && migrated.defaults()->num_ctx == 32768 &&
             migrated.defaults()->temperature == 0.2 && migrated.defaults()->top_p == 1 &&
             migrated.configured_models() == std::vector<ConfiguredModel>{{"ollama", "http://localhost:11434", "legacy-model", "legacy-model"}} &&
-            !migrated.tutorial_mode() && !migrated.developer_mode() && raw_read(legacy_config / "ai-defaults.json") == legacy_bytes, "Legacy explicit settings or model identity were lost during read-only migration");
+            !migrated.tutorial_mode() && !migrated.developer_mode() && migrated.right_sidebar_visible() && raw_read(legacy_config / "ai-defaults.json") == legacy_bytes, "Legacy explicit settings or model identity were lost during read-only migration");
         migrated.set_tutorial_mode(true);
-        check(AiPreferences(legacy_config).defaults() == migrated.defaults() && json::parse(raw_read(legacy_config / "ai-defaults.json")).find("version")->number() == 2,
+        check(AiPreferences(legacy_config).defaults() == migrated.defaults() && AiPreferences(legacy_config).right_sidebar_visible() && json::parse(raw_read(legacy_config / "ai-defaults.json")).find("version")->number() == 2,
             "Legacy preferences did not migrate on explicit save");
 
         AiSettings first{"ollama", "http://localhost:11434", "first-model", 1536, 512, 64000, 0.35, 0.95, true, true, "auto", "medium", {"trusted-provider/model-route"}, true};
@@ -242,6 +268,9 @@ int main() {
         std::filesystem::permissions(config / "ai-defaults.json", std::filesystem::perms::owner_read | std::filesystem::perms::group_read | std::filesystem::perms::others_read);
         AiPreferences read_only(config);
         fails(FileFailure::permission, [&] { read_only.save(first); });
+        fails(FileFailure::permission, [&] { read_only.set_right_sidebar_visible(false); });
+        check(read_only.right_sidebar_visible() && raw_read(config / "ai-defaults.json") == known,
+            "Refused sidebar save changed loaded visibility or the read-only document");
         std::filesystem::permissions(config / "ai-defaults.json", std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
 #endif
         std::cout << "AI preferences checks passed\n";

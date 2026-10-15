@@ -14,9 +14,16 @@ import os
 from pathlib import Path
 import re
 import stat
-from dataclasses import dataclass
+from contextlib import nullcontext
+from dataclasses import asdict, dataclass
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import quote
+import uuid
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 
 from .providers import ProviderError
 
@@ -130,7 +137,7 @@ def _utf8(value: str, kind: str = "text") -> bytes:
 def _json_bytes(value: Any) -> bytes:
     try:
         return _utf8(json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n")
-    except (TypeError, RecursionError):
+    except (TypeError, RecursionError, ValueError):
         raise ScribbleError("data must be a bounded JSON structure") from None
 
 
@@ -316,11 +323,17 @@ def _invoke(provider: Any, messages: List[Dict[str, str]], purpose: str,
               "model": str(detail.get("model") or model),
               "response_sha256": _digest(response_bytes),
               "request_sha256": _digest(request)}
+    if any(len(record[key]) > 1024 for key in ("provider", "model")):
+        raise ScribbleError("provider provenance exceeds configured limits")
+    for key in ("provider", "model"):
+        _utf8(record[key], "provider provenance")
     usage = detail.get("usage")
     if isinstance(usage, Mapping):
+        if len(usage) > 64 or any(not isinstance(key, str) or len(key) > 128 for key in usage):
+            raise ScribbleError("provider usage exceeds configured limits")
         record["usage"] = {key: value for key, value in usage.items()
                            if isinstance(key, str) and type(value) in (int, float)
-                           and value >= 0 and (type(value) is int or math.isfinite(value))}
+                           and 0 <= value <= 10 ** 18 and (type(value) is int or math.isfinite(value))}
     return response, record
 
 
@@ -357,6 +370,262 @@ def _semantic_annotation(response: str, config: ScribbleConfig) -> Dict[str, Any
     return value
 
 
+_CHECKPOINT_CONTEXT_BYTES = 8 * 1024 * 1024
+_CHECKPOINT_BYTES = 256 * 1024 * 1024
+_CHECKPOINT_PREFIX = ".tinyenv-scribble-"
+
+
+def _checkpoint_path(output: Path) -> Path:
+    return output.parent / (_CHECKPOINT_PREFIX + _digest(_utf8(str(output)))[:32] + ".checkpoint")
+
+
+def _provider_binding(provider: Any) -> Dict[str, str]:
+    name, model = _provider_identity(provider)
+    config = getattr(provider, "config", None)
+    fields = ("provider", "model", "base_url", "parameters", "network_enabled", "timeout",
+              "max_input_bytes", "max_response_bytes", "max_output_chars", "max_price_per_million",
+              "zdr", "routing_providers", "model_metadata")
+    values = {key: config[key] if isinstance(config, Mapping) else getattr(config, key)
+              for key in fields if (key in config if isinstance(config, Mapping) else hasattr(config, key))}
+    data = _json_bytes(values)
+    if len(data) > 65536:
+        raise ScribbleError("provider identity exceeds checkpoint limits")
+    kind = provider if isinstance(provider, type(lambda: None)) else type(provider)
+    return {"provider": name, "model": model, "configuration_sha256": _digest(data),
+            "adapter": kind.__module__ + "." + kind.__qualname__}
+
+
+def _checked_json(data: bytes) -> Any:
+    def unique(pairs: Any) -> Dict[str, Any]:
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ScribbleError("duplicate checkpoint JSON field")
+            value[key] = item
+        return value
+    def constant(value: str) -> None:
+        raise ScribbleError("invalid checkpoint JSON number")
+    try:
+        return json.loads(data.decode("utf-8"), object_pairs_hook=unique, parse_constant=constant)
+    except (UnicodeError, ValueError, RecursionError):
+        raise ScribbleError("invalid checkpoint JSON") from None
+
+
+class _Checkpoint:
+    """Private, no-follow immutable records with an OS-released exclusive lock."""
+    def __init__(self, output: Path, resume: bool, bound: int, read_only: bool = False):
+        self.output = output
+        self.path = _checkpoint_path(output)
+        self.parent = None
+        self.resume = resume
+        self.read_only = read_only
+        self.pending_aliases = set()
+        self.bound = min(bound, _CHECKPOINT_BYTES)
+        self.directory = self.lock = None
+
+    @staticmethod
+    def _private(info: os.stat_result, directory: bool = False, links: int = 1) -> None:
+        if (info.st_uid != os.getuid() or info.st_mode & 0o077
+                or not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode))
+                or (not directory and info.st_nlink != links)):
+            raise ScribbleError("checkpoint ownership or file type is unsafe")
+
+    @staticmethod
+    def supported() -> bool:
+        return not (fcntl is None or not hasattr(os, "getuid") or not hasattr(os, "O_NOFOLLOW")
+                or not hasattr(os, "O_DIRECTORY") or os.open not in os.supports_dir_fd
+                or os.link not in os.supports_dir_fd or os.unlink not in os.supports_dir_fd)
+
+    def __enter__(self) -> "_Checkpoint":
+        if not self.supported():
+            raise ScribbleError("durable Scribble checkpoints need qualified POSIX filesystem operations")
+        parent = os.open(self.path.anchor, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            for component in self.path.parts[1:-1]:
+                try:
+                    child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+                except FileNotFoundError:
+                    if self.resume:
+                        raise ScribbleError("no Scribble checkpoint exists to resume") from None
+                    os.mkdir(component, dir_fd=parent)
+                    child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+                os.close(parent)
+                parent = child
+            if not self.resume:
+                try:
+                    os.mkdir(self.path.name, 0o700, dir_fd=parent)
+                    os.fsync(parent)
+                except FileExistsError:
+                    raise ScribbleError("Scribble checkpoint already exists; choose Resume explicitly or a fresh output") from None
+            self.parent = os.dup(parent)
+            self.parent_identity = (os.fstat(parent).st_dev, os.fstat(parent).st_ino)
+            self.directory = os.open(self.path.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            self._private(os.fstat(self.directory), directory=True)
+            self.directory_identity = (os.fstat(self.directory).st_dev, os.fstat(self.directory).st_ino)
+            flags = os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK
+            if not self.resume:
+                flags |= os.O_CREAT | os.O_EXCL
+            self.lock = os.open("lock", flags, 0o600, dir_fd=self.directory)
+            self._private(os.fstat(self.lock))
+            if os.fstat(self.lock).st_size:
+                raise ScribbleError("invalid checkpoint lock")
+            self.lock_identity = _identity(os.fstat(self.lock))
+            try:
+                fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise ScribbleError("Scribble checkpoint is owned by an active build") from None
+            self.verify()
+            self.names(recover=not self.read_only)
+            return self
+        except OSError:
+            self.close()
+            raise ScribbleError("Scribble checkpoint is unavailable or unsafe") from None
+        except BaseException:
+            self.close()
+            raise
+        finally:
+            os.close(parent)
+
+    def verify(self) -> None:
+        _check_components(self.path)
+        current_parent = self.output.parent.lstat()
+        if (current_parent.st_dev, current_parent.st_ino) != self.parent_identity:
+            raise ScribbleError("checkpoint parent directory changed")
+        current = os.stat(self.path.name, dir_fd=self.parent, follow_symlinks=False)
+        self._private(current, directory=True)
+        if (current.st_dev, current.st_ino) != self.directory_identity:
+            raise ScribbleError("checkpoint directory changed")
+        current_lock = os.stat("lock", dir_fd=self.directory, follow_symlinks=False)
+        self._private(current_lock)
+        if _identity(current_lock) != self.lock_identity:
+            raise ScribbleError("checkpoint lock changed")
+
+    def names(self, recover: bool = False) -> List[str]:
+        self.verify()
+        names, pending = [], []
+        with os.scandir(self.directory) as entries:
+            for entry in entries:
+                names.append(entry.name)
+                if len(names) > 4104:
+                    raise ScribbleError("checkpoint contains too many records")
+                if re.fullmatch(r"\.pending-[a-f0-9]{32}", entry.name):
+                    info = entry.stat(follow_symlinks=False)
+                    if (info.st_uid != os.getuid() or info.st_mode & 0o077 or not stat.S_ISREG(info.st_mode)
+                            or info.st_nlink not in (1, 2) or info.st_size > self.bound):
+                        raise ScribbleError("checkpoint temporary ownership is unsafe")
+                    pending.append((entry.name, info))
+                elif (entry.name not in ("lock", "manifest.json", "scribbles.md", "index.json", "evidence.json")
+                      and not re.fullmatch(r"chunk-[0-9]{4}\.json", entry.name)):
+                    raise ScribbleError("checkpoint contains an unexpected artifact")
+        for name, info in pending:
+            if info.st_nlink == 1:
+                continue  # A partial write is never treated as a completed record.
+            aliases = []
+            for other in names:
+                if other == "lock" or other.startswith(".pending-"):
+                    continue
+                current = os.stat(other, dir_fd=self.directory, follow_symlinks=False)
+                if (current.st_dev, current.st_ino) == (info.st_dev, info.st_ino):
+                    aliases.append(other)
+            if len(aliases) != 1:
+                raise ScribbleError("checkpoint temporary collides with an unknown artifact")
+            if not recover:
+                if not self.read_only:
+                    raise ScribbleError("checkpoint temporary cleanup is incomplete")
+                self.pending_aliases.add((info.st_dev, info.st_ino))
+                continue
+            # Publication fsyncs bytes before linking. Under the exclusive lock, the
+            # two names on this exact private inode prove this interrupted cleanup.
+            current = os.stat(name, dir_fd=self.directory, follow_symlinks=False)
+            if _identity(current) != _identity(info):
+                raise ScribbleError("checkpoint temporary changed")
+            os.unlink(name, dir_fd=self.directory)
+            os.fsync(self.directory)
+            names.remove(name)
+        return names
+
+    def read_bytes(self, name: str, *, staged: bool = False) -> bytes:
+        self.verify()
+        descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=self.directory)
+        try:
+            before = os.fstat(descriptor)
+            if staged:
+                if before.st_uid != os.getuid() or before.st_mode & 0o077 or not stat.S_ISREG(before.st_mode) or before.st_nlink > 2:
+                    raise ScribbleError("checkpoint publication ownership is unsafe")
+            else:
+                alias = (self.read_only and before.st_nlink == 2
+                         and (before.st_dev, before.st_ino) in self.pending_aliases)
+                self._private(before, links=2 if alias else 1)
+            if before.st_size > self.bound:
+                raise ScribbleError("checkpoint exceeds configured limits")
+            with os.fdopen(descriptor, "rb", closefd=False) as stream:
+                data = stream.read(self.bound + 1)
+            current = os.stat(name, dir_fd=self.directory, follow_symlinks=False)
+            if (len(data) > self.bound or _identity(before) != _identity(os.fstat(descriptor))
+                    or _identity(before) != _identity(current)):
+                raise ScribbleError("checkpoint changed while reading")
+            self.verify()
+            return data
+        finally:
+            os.close(descriptor)
+
+    def read(self, name: str) -> Dict[str, Any]:
+        value = _checked_json(self.read_bytes(name))
+        if (not isinstance(value, dict) or set(value) != {"value", "sha256"}
+                or not isinstance(value["value"], dict) or value["sha256"] != _digest(_json_bytes(value["value"]))):
+            raise ScribbleError("checkpoint hash mismatch")
+        return value["value"]
+
+    def write_bytes(self, name: str, data: bytes) -> None:
+        self.verify()
+        if len(data) > self.bound:
+            raise ScribbleError("checkpoint exceeds configured limits")
+        temporary = ".pending-" + uuid.uuid4().hex
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                             0o600, dir_fd=self.directory)
+        temporary_identity = (os.fstat(descriptor).st_dev, os.fstat(descriptor).st_ino)
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(data)
+                stream.flush()
+                os.fsync(stream.fileno())
+                written_identity = _identity(os.fstat(stream.fileno()))
+            self.verify()
+            current = os.stat(temporary, dir_fd=self.directory, follow_symlinks=False)
+            self._private(current)
+            if _identity(current) != written_identity:
+                raise ScribbleError("checkpoint temporary changed before publication")
+            os.link(temporary, name, src_dir_fd=self.directory, dst_dir_fd=self.directory, follow_symlinks=False)
+            os.unlink(temporary, dir_fd=self.directory)
+            os.fsync(self.directory)
+        except BaseException:
+            # A crash may leave an owned temporary record; it is never reused as completion.
+            try:
+                current = os.stat(temporary, dir_fd=self.directory, follow_symlinks=False)
+                if (current.st_dev, current.st_ino) == temporary_identity:
+                    os.unlink(temporary, dir_fd=self.directory)
+            except OSError:
+                pass
+            raise
+
+    def write(self, name: str, value: Dict[str, Any]) -> None:
+        self.write_bytes(name, _json_bytes({"value": value, "sha256": _digest(_json_bytes(value))}))
+
+    def close(self) -> None:
+        if self.lock is not None:
+            os.close(self.lock)
+            self.lock = None
+        if self.directory is not None:
+            os.close(self.directory)
+            self.directory = None
+        if self.parent is not None:
+            os.close(self.parent)
+            self.parent = None
+
+    def __exit__(self, *unused: Any) -> None:
+        self.close()
+
+
 class ScribbleBuilder:
     def __init__(self, config: Optional[ScribbleConfig] = None, provider: Any = None):
         self.config = config or ScribbleConfig()
@@ -379,14 +648,14 @@ class ScribbleBuilder:
             skipped.append({"path": str(path), "reason": reason})
         def visit(path: Path, depth: int = 0) -> None:
             nonlocal scanned
+            if (path == output or output in path.parents or any(
+                    part.startswith(_CHECKPOINT_PREFIX) and part.endswith(".checkpoint") for part in path.parts)):
+                return
             if scanned >= self.config.max_scan_entries:
                 return
             scanned += 1
             if depth > self.config.max_directory_depth:
                 skip(path, "directory_depth_limit")
-                return
-            if path == output or output in path.parents:
-                skip(path, "output_directory")
                 return
             if _sensitive(path):
                 skip(path, "private_or_excluded_path")
@@ -406,6 +675,9 @@ class ScribbleBuilder:
                 entries = []
                 with os.scandir(str(path)) as iterator:
                     for entry in iterator:
+                        if (Path(entry.path) == output or
+                                entry.name.startswith(_CHECKPOINT_PREFIX) and entry.name.endswith(".checkpoint")):
+                            continue
                         entries.append(Path(entry.path))
                         if len(entries) > self.config.max_scan_entries - scanned:
                             skip(path, "directory_scan_limit")
@@ -554,16 +826,78 @@ class ScribbleBuilder:
                         + str(source["byte_count"]) + " bytes; " + str(source["line_count"]) + " lines.")
         return "\n".join(text) + "\n"
 
-    def build(self, selected_paths: Iterable[Any], output_dir: Any) -> ScribbleResult:
+    @staticmethod
+    def checkpoint_supported() -> bool:
+        """Fresh builds remain available when durable Resume primitives are absent."""
+        return _Checkpoint.supported()
+
+    def _checkpoint_bound(self) -> int:
+        return min(_CHECKPOINT_BYTES, self.config.max_total_bytes * 8
+                   + self.config.max_chunks * (self.config.max_response_chars * 8 + 8192)
+                   + _CHECKPOINT_CONTEXT_BYTES + 65536)
+
+    def checkpoint_context(self, output_dir: Any) -> Any:
+        """Read checked context for an explicit Resume; never invoke a provider."""
+        output = _absolute(output_dir)
+        try:
+            with _Checkpoint(output, True, self._checkpoint_bound(), read_only=True) as checkpoint:
+                checkpoint.names()
+                manifest = checkpoint.read("manifest.json")
+                self._check_manifest(manifest, output)
+                return manifest["context"]
+        except OSError:
+            raise ScribbleError("Scribble checkpoint is unavailable or unsafe") from None
+
+    def _check_manifest(self, manifest: Dict[str, Any], output: Path) -> None:
+        if (set(manifest) != {"schema", "output", "config", "provider", "selected_paths", "snapshot",
+                              "request_sha256", "context"}
+                or manifest["schema"] != "tinyenv.scribbles.checkpoint.v1"
+                or manifest["output"] != str(output)
+                or _json_bytes(manifest["config"]) != _json_bytes(asdict(self.config))
+                or _json_bytes(manifest["provider"]) != _json_bytes(_provider_binding(self.provider) if self.config.ai_enabled else None)):
+            raise ScribbleError("Scribble checkpoint configuration or provider identity is incompatible")
+        if len(_json_bytes(manifest["context"])) > _CHECKPOINT_CONTEXT_BYTES:
+            raise ScribbleError("Scribble checkpoint context exceeds limits")
+
+    def build(self, selected_paths: Iterable[Any], output_dir: Any, *, resume: bool = False,
+              on_progress: Any = None, checkpoint_context: Any = None) -> ScribbleResult:
+        if type(resume) is not bool or (on_progress is not None and not callable(on_progress)):
+            raise ScribbleError("Resume must be boolean and progress must be a callback")
+        if resume and not self.checkpoint_supported():
+            raise ScribbleError("durable Scribble checkpoints need qualified POSIX filesystem operations")
+        context_bytes = _json_bytes(checkpoint_context)
+        if len(context_bytes) > _CHECKPOINT_CONTEXT_BYTES:
+            raise ScribbleError("Scribble checkpoint context exceeds limits")
+        checkpoint_context = _checked_json(context_bytes)
+        resumed = 0
+        def progress(phase: str, completed: int, total: int) -> None:
+            if on_progress is not None:
+                try:
+                    accepted = on_progress({"phase": phase, "completed_chunks": completed,
+                                            "total_chunks": total, "resumed_chunks": resumed})
+                except Exception:
+                    raise ScribbleError("Scribble progress callback failed; completed checkpoints are retained") from None
+                if accepted is False:
+                    raise ScribbleError("Scribble build interrupted; choose Resume explicitly to continue")
         output = _absolute(output_dir)
         _check_components(output, allow_missing=True)
         if output.exists() and not output.is_dir():
             raise ScribbleError("output_dir must be a directory")
-        _preflight_new([output / name for name in ("scribbles.md", "index.json", "evidence.json")])
-        paths, skipped = self._collect(selected_paths, output)
+        if not resume:
+            _preflight_new([output / name for name in ("scribbles.md", "index.json", "evidence.json")])
+            _preflight_new([_checkpoint_path(output)])
+        selected_paths = [selected_paths] if isinstance(selected_paths, (str, os.PathLike)) else selected_paths
+        selections = []
+        for number, value in enumerate(selected_paths):
+            if number >= self.config.max_scan_entries:
+                raise ScribbleError("too many selected checkpoint paths")
+            selections.append(str(_absolute(value)))
+        progress("preparing", 0, 0)
+        paths, skipped = self._collect(selections, output)
         sources: List[Dict[str, Any]] = []
         chunks: List[Dict[str, Any]] = []
         consumed = 0
+        source_identities = []
         for path in paths:
             if len(sources) >= self.config.max_files:
                 skipped.append({"path": str(path), "reason": "file_limit"})
@@ -576,11 +910,15 @@ class ScribbleBuilder:
                 continue
             consumed += source["byte_count"]
             sources.append(source)
+            source_identities.append(list(_identity(path.stat())))
             chunks.extend(entries)
         if not sources:
             raise ScribbleError("no eligible UTF-8 regular sources selected")
         self._references(chunks)
         calls = []
+        prepared = []
+        if len(chunks) > 4096:
+            raise ScribbleError("generation exceeds the durable checkpoint chunk limit")
         if self.config.ai_enabled:
             if len(chunks) > self.config.max_provider_calls:
                 raise ScribbleError("generation exceeds the configured provider call budget")
@@ -605,14 +943,97 @@ class ScribbleBuilder:
                 if sum(len(message["content"]) for message in messages) > self.config.max_context_chars:
                     raise ScribbleError("generation context exceeds the configured limit")
                 prepared.append((chunk, metadata, messages))
-            for chunk, metadata, messages in prepared:
-                response, record = _invoke(self.provider, messages, "scribble", [metadata], self.config.max_response_chars)
-                chunk["ai_annotation"] = response
-                chunk["ai_semantics"] = _semantic_annotation(response, self.config)
-                chunk["keywords"] = list(dict.fromkeys(chunk["local_keywords"] + chunk["ai_semantics"]["keywords"]))
-                record["chunk_id"] = chunk["id"]
-                calls.append(record)
-            self._references(chunks)
+        manifest = {"schema": "tinyenv.scribbles.checkpoint.v1", "output": str(output),
+                    "config": asdict(self.config),
+                    "provider": _provider_binding(self.provider) if self.config.ai_enabled else None,
+                    "selected_paths": selections,
+                    "snapshot": {"sources": sources, "chunks": chunks, "skipped": skipped,
+                                 "source_identities": source_identities, "source_bytes": consumed},
+                    "request_sha256": [_digest(_json_bytes(messages)) for _, _, messages in prepared],
+                    "context": checkpoint_context}
+        try:
+            owner = _Checkpoint(output, resume, self._checkpoint_bound()) if self.checkpoint_supported() else nullcontext(None)
+            with owner as checkpoint:
+                if resume:
+                    saved_manifest = checkpoint.read("manifest.json")
+                    self._check_manifest(saved_manifest, output)
+                    if _json_bytes(saved_manifest) != _json_bytes(manifest):
+                        raise ScribbleError("Scribble checkpoint source selection, source bytes, requests or context changed")
+                elif checkpoint is not None:
+                    checkpoint.write("manifest.json", manifest)
+                names = checkpoint.names() if checkpoint is not None else []
+                completed = sorted(name for name in names if re.fullmatch(r"chunk-[0-9]{4}\.json", name))
+                if completed != ["chunk-" + str(number).zfill(4) + ".json" for number in range(len(completed))]:
+                    raise ScribbleError("Scribble checkpoint has incomplete or colliding chunk records")
+                if len(completed) > len(prepared):
+                    raise ScribbleError("Scribble checkpoint has unexpected chunk records")
+                for number, name in enumerate(completed):
+                    item = checkpoint.read(name)
+                    if set(item) != {"response", "record"}:
+                        raise ScribbleError("invalid Scribble checkpoint response record")
+                    response, record = item["response"], item["record"]
+                    if (not isinstance(response, str) or len(response) > self.config.max_response_chars
+                            or not isinstance(record, dict) or not {"provider", "model", "response_sha256", "request_sha256", "chunk_id"} <= set(record)
+                            or set(record) - {"provider", "model", "response_sha256", "request_sha256", "chunk_id", "usage"}
+                            or record["chunk_id"] != chunks[number]["id"]
+                            or record["response_sha256"] != _digest(_utf8(response))
+                            or record["request_sha256"] != manifest["request_sha256"][number]
+                            or any(not isinstance(record[key], str) or len(record[key]) > 1024 for key in ("provider", "model"))):
+                        raise ScribbleError("invalid Scribble checkpoint provenance")
+                    usage = record.get("usage", {})
+                    if (not isinstance(usage, dict) or len(usage) > 64
+                            or any(not isinstance(key, str) or len(key) > 128 or type(value) not in (int, float)
+                                   or not 0 <= value <= 10 ** 18 or (type(value) is float and not math.isfinite(value))
+                                   for key, value in usage.items())):
+                        raise ScribbleError("invalid Scribble checkpoint usage")
+                    _reject_openai(type("Identity", (), record)())
+                    chunks[number]["ai_annotation"] = response
+                    chunks[number]["ai_semantics"] = _semantic_annotation(response, self.config)
+                    chunks[number]["keywords"] = list(dict.fromkeys(chunks[number]["local_keywords"] + chunks[number]["ai_semantics"]["keywords"]))
+                    calls.append(record)
+                resumed = len(completed)
+                if checkpoint is not None:
+                    staged_names = {name for name in names if name in ("scribbles.md", "index.json", "evidence.json")}
+                    if staged_names and len(completed) != len(prepared):
+                        raise ScribbleError("Scribble checkpoint publication precedes complete annotations")
+                    for name in ("scribbles.md", "index.json", "evidence.json"):
+                        try:
+                            existing = (output / name).lstat()
+                        except FileNotFoundError:
+                            continue
+                        if name not in staged_names:
+                            raise ScribbleError("output artifacts collide with the owned Scribble publication")
+                        staged = os.stat(name, dir_fd=checkpoint.directory, follow_symlinks=False)
+                        if (existing.st_dev, existing.st_ino) != (staged.st_dev, staged.st_ino):
+                            raise ScribbleError("output artifacts collide with the owned Scribble publication")
+                # Validate every durable record before the first resumed provider call.
+                progress("indexing", resumed, len(chunks))
+                for number, (chunk, metadata, messages) in enumerate(prepared):
+                    if number < resumed:
+                        continue
+                    if checkpoint is not None:
+                        checkpoint.verify()
+                    response, record = _invoke(self.provider, messages, "scribble", [metadata], self.config.max_response_chars)
+                    semantic = _semantic_annotation(response, self.config)
+                    record["chunk_id"] = chunk["id"]
+                    if checkpoint is not None:
+                        checkpoint.write("chunk-" + str(number).zfill(4) + ".json", {"response": response, "record": record})
+                    chunk["ai_annotation"], chunk["ai_semantics"] = response, semantic
+                    chunk["keywords"] = list(dict.fromkeys(chunk["local_keywords"] + semantic["keywords"]))
+                    calls.append(record)
+                    progress("enriching", len(calls), len(chunks))
+                if self.config.ai_enabled:
+                    self._references(chunks)
+                progress("publishing", len(chunks), len(chunks))
+                result = self._publish(output, sources, chunks, calls, consumed, skipped, checkpoint)
+                progress("completed", len(chunks), len(chunks))
+                return result
+        except OSError:
+            raise ScribbleError("Scribble checkpoint or output artifacts cannot be written safely") from None
+
+    def _publish(self, output: Path, sources: List[Dict[str, Any]], chunks: List[Dict[str, Any]],
+                 calls: List[Dict[str, Any]], consumed: int, skipped: List[Dict[str, str]],
+                 checkpoint: Optional[_Checkpoint]) -> ScribbleResult:
         index = {"schema": "tinyenv.scribbles.v1", "label": self.config.label, "sources": sources,
                  "chunks": chunks, "keywords": sorted({word for chunk in chunks for word in chunk["keywords"]})}
         markdown = self._markdown(sources, chunks)
@@ -625,21 +1046,65 @@ class ScribbleBuilder:
                     "limits": {key: getattr(self.config, key) for key in ("chunk_bytes", "max_file_bytes", "max_total_bytes", "max_files", "max_chunks", "max_scan_entries", "max_provider_calls", "max_context_chars", "max_directory_depth")},
                     "artifacts": {"scribbles.md": _digest(markdown_bytes), "index.json": _digest(index_bytes)},
                     "qualification": {"comprehension_evaluated": False, "improvement_claimed": False}}
-        output.mkdir(parents=True, exist_ok=True)
-        _check_components(output)
-        created = []
-        try:
-            for name, data in (("scribbles.md", markdown_bytes), ("index.json", index_bytes), ("evidence.json", _json_bytes(evidence))):
-                path = output / name
-                descriptor = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
-                created.append(path)
-                with os.fdopen(descriptor, "wb") as stream:
-                    stream.write(data)
+        artifacts = (("scribbles.md", markdown_bytes), ("index.json", index_bytes), ("evidence.json", _json_bytes(evidence)))
+        if checkpoint is None:
+            output.mkdir(parents=True, exist_ok=True)
+            _check_components(output)
+            created = []
+            try:
+                for name, data in artifacts:
+                    path = output / name
+                    descriptor = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+                    created.append(path)
+                    with os.fdopen(descriptor, "wb") as stream:
+                        stream.write(data)
+            except OSError:
+                for path in created:
+                    path.unlink()
+                raise ScribbleError("output artifacts already exist or cannot be written; use a fresh output directory") from None
             return ScribbleResult(output / "scribbles.md", output / "index.json", output / "evidence.json", markdown, index, evidence)
+        # Immutable staged inodes prove ownership even if a process dies between final links.
+        names = checkpoint.names()
+        for name, data in artifacts:
+            if name in names:
+                if checkpoint.read_bytes(name, staged=True) != data:
+                    raise ScribbleError("Scribble checkpoint publication hash mismatch")
+            else:
+                checkpoint.write_bytes(name, data)
+        try:
+            try:
+                os.mkdir(output.name, dir_fd=checkpoint.parent)
+                os.fsync(checkpoint.parent)
+            except FileExistsError:
+                pass
+            checkpoint.verify()
+            _check_components(output)
+            descriptor = os.open(output.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=checkpoint.parent)
+            output_identity = (os.fstat(descriptor).st_dev, os.fstat(descriptor).st_ino)
+            try:
+                for name, data in artifacts:
+                    checkpoint.verify()
+                    _check_components(output)
+                    current = output.lstat()
+                    if (current.st_dev, current.st_ino) != output_identity:
+                        raise ScribbleError("Scribble output directory changed")
+                    staged = os.stat(name, dir_fd=checkpoint.directory, follow_symlinks=False)
+                    try:
+                        existing = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+                    except FileNotFoundError:
+                        os.link(name, name, src_dir_fd=checkpoint.directory, dst_dir_fd=descriptor, follow_symlinks=False)
+                    else:
+                        if (existing.st_dev, existing.st_ino) != (staged.st_dev, staged.st_ino):
+                            raise ScribbleError("output artifacts collide with the owned Scribble publication")
+                    os.fsync(descriptor)
+                    if checkpoint.read_bytes(name, staged=True) != data:
+                        raise ScribbleError("Scribble checkpoint publication changed")
+                checkpoint.verify()
+            finally:
+                os.close(descriptor)
         except OSError:
-            for path in created:
-                path.unlink()
-            raise ScribbleError("output artifacts already exist or cannot be written; use a fresh output directory") from None
+            raise ScribbleError("output artifacts already exist or cannot be written safely") from None
+        return ScribbleResult(output / "scribbles.md", output / "index.json", output / "evidence.json", markdown, index, evidence)
 
     def load(self, output_dir: Any) -> ScribbleResult:
         """Load a bounded saved build, verifying source and artifact hashes."""

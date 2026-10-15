@@ -35,6 +35,7 @@ public:
     [[nodiscard]] const std::vector<ConfiguredModel>& configured_models() const noexcept { return configured_models_; }
     [[nodiscard]] bool tutorial_mode() const noexcept { return tutorial_mode_; }
     [[nodiscard]] bool developer_mode() const noexcept { return developer_mode_; }
+    [[nodiscard]] bool right_sidebar_visible() const noexcept { return right_sidebar_visible_; }
     [[nodiscard]] const std::string& openrouter_guardrail_id() const noexcept { return openrouter_guardrail_id_; }
     // The caller uses this only for an explicit Apply action. It never persists
     // a draft, credentials, or incidental changes caused by switching chats.
@@ -47,6 +48,8 @@ public:
     void set_tutorial_mode(bool enabled);
     // Chat history is read-only unless this application-wide opt-in is enabled.
     void set_developer_mode(bool enabled);
+    // Application-wide layout preference, visible until explicitly hidden.
+    void set_right_sidebar_visible(bool visible);
     // Nonsecret management-resource identity only. Actual remote guardrail
     // state and management credentials are never stored in this document.
     void save_guardrail_id(std::string id);
@@ -60,8 +63,9 @@ private:
     std::optional<AiSettings> defaults_;
     std::vector<ConfiguredModel> configured_models_;
     bool tutorial_mode_{}, developer_mode_{};
+    bool right_sidebar_visible_{true};
     std::string openrouter_guardrail_id_;
-    void save_document(std::optional<AiSettings> defaults, std::vector<ConfiguredModel> models, bool tutorial_mode, std::string guardrail_id, bool developer_mode);
+    void save_document(std::optional<AiSettings> defaults, std::vector<ConfiguredModel> models, bool tutorial_mode, std::string guardrail_id, bool developer_mode, bool right_sidebar_visible);
 };
 
 } // namespace tinyenv

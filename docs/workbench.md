@@ -82,7 +82,9 @@ The chat file remains readable and editable using an ordinary text editor.
 The companion state stores the current draft, pending-image metadata,
 pseudocode, last submitted-message provenance, selected tabs, configured terminal
 start directory, provider settings, source provenance and enabled Scribbles,
-Refs and Tools paths. Image bytes are stored separately in project-managed snapshots.
+Refs and Tools paths. It also stores the per-chat Scribble builder mode, setup,
+selected builder tab and retained task records. Image bytes are stored separately
+in project-managed snapshots.
 Credentials use the private provider-key controls or existing process environment
 and private provider configuration, outside chat text and state.
 Research sources persist bounded metadata, with raw source text omitted.
@@ -116,6 +118,14 @@ bounded disk-usage information. The center provides Chat Markdown, Pseudocode
 Editor and Bash Terminal, with a split-chat view and composer. The right pane
 provides Git, Sources, Selector, Pseudocode, Prompts and AI.
 
+The global **Sidebar** checkbox in the bottom bar shows or hides the right pane
+and remains reachable when that pane is hidden. It starts enabled and remembers
+its setting across projects and restarts. Hiding the pane expands the center;
+showing it restores the selected right tab, its fields and scroll position.
+Send/Retry validation that needs AI settings reveals the sidebar and opens AI
+at its repair controls; **Show AI settings** in Running Tasks does the same.
+A preference-save error is reported without preventing that automatic reveal.
+
 Right-click a file or folder, or use **Actions**, to open it, create a file or
 folder, copy a text file, rename it, or delete it after confirmation. Deleting a
 directory uses `rmdir` semantics: it must be empty, including hidden entries. There is no
@@ -147,6 +157,8 @@ operations, so a late failure can leave the copied chat with unconfirmed state.
 The diagnostic names those paths for inspection.
 
 Escape dismisses the current dialog or menu and does not exit the application.
+In the Scribble builder workspace, Escape neither leaves builder mode nor cancels
+work; a nested file dialog or menu still handles its own Escape action.
 Closing an edited file still requires saving or explicitly discarding changes.
 Use the window's close control to exit.
 Minimizing or switching away from the native window does not stop its tasks;
@@ -219,6 +231,15 @@ The selected descriptor's allowed paths restrict model-requested local access.
 The current runtime refuses executable/script descriptors and supplies no
 model-directed Bash command capability; the separate terminal accepts user
 commands. Provider-native tools are handled by the separate restrictions below.
+
+**Code** in Selector is a separate per-chat opt-in and starts off,
+including in older state without that setting. It allows the model to request
+the local `calculate` tool during Chat and Agentic replies. The saved
+`selector.calculations` boolean and tool name remain compatible with earlier
+chats and helper requests. It grants no file permissions and is excluded from
+Scribble building and comprehension evaluation.
+See the [Code tool](#code-tool) for its restricted numeric language, explicit data
+format and limits.
 
 To start a conversation, choose New in Chats and enter a project-relative
 Markdown filename. In AI, choose a provider and enter or select its model
@@ -582,6 +603,115 @@ smaller images if its input budget is exhausted. Critique must receive the
 complete latest candidate; if it cannot fit, the run fails before asking for an
 incomplete review.
 
+<a id="restricted-calculations"></a>
+
+## Code tool
+
+With **Code** enabled, the model can use a bounded numeric AST interpreter with
+Python-shaped syntax. Its primitives support user-written information
+calculations, basic vision over numeric pixels, signal filters and QR algorithms
+from scratch. A QR decoder must implement its own numeric processing within the
+language and budgets; the tool supplies no QR library or built-in scanner. These
+capabilities do not establish general image recognition or QR scanning quality.
+Ordinary Chat/Agentic provider requests continue to use the selected AI settings.
+
+The interpreter handles only its listed syntax and primitives. It does not
+execute general Python, compile user source to bytecode, call `eval` or `exec`,
+or provide an operating-system sandbox. It has no imports, file access, network
+access, shell or system-library loading. Its restricted grammar, numeric data
+validation and resource budgets are the execution boundary, rather than a claim
+of absolute exploit immunity.
+
+The `calculate` tool arguments are a `code` string and an optional `data` value;
+no other argument keys are accepted.
+`data` accepts only finite integers, finite floats, booleans and nested JSON
+lists, subject to the numeric and container limits below. Strings, objects and
+`null` are rejected, including filename strings, metadata objects and
+base64/encoded-image strings. Omitted `data` becomes `[]`; an explicit `null` is
+invalid. The interpreter makes a private numeric copy available through the
+reserved name `data`. Code can update its
+list cells with numeric or boolean scalars, but cannot rebind `data` or insert
+container links through indexed assignment.
+
+Pixel input must already be supplied as explicit numeric arrays, for example
+`[[0, 255], [255, 0]]` for a small grayscale grid or lists of numeric RGB
+triples. The algorithm checks its required dimensions and channel ranges; the
+generic numeric input format also serves other numeric domains. There is no
+PNG/JPEG decoder, compressed-image parser, file reader or automatic access to
+composer attachments. An image attachment sent to a vision model does not
+automatically become Code input.
+
+Program source must be ASCII. Every quote and backslash is rejected, including
+in comments; only newline, carriage return and tab are allowed control
+characters. There are no string literals or source/data escape-decoding
+operations. JSON transport still represents `code` as a string and encodes its
+line breaks normally: that envelope is parsed once, and the resulting program
+is never reinterpreted as another encoded language or executed by Python.
+
+Supported forms include finite integers and floats, booleans, named variables,
+lists and tuples, integer indexing, read-only slices, fixed unpacking,
+arithmetic, integer bitwise operations, comparisons, conditional expressions
+and statements, list comprehensions, bounded `for` and `while` loops, and
+`break`/`continue`. Indexed writes can replace existing list cells only with
+numeric or boolean scalars. Top-level function definitions accept positional
+arguments, keep local bindings, read global numeric values and return numeric
+values, booleans or containers; recursive and nested definitions are rejected.
+A final expression supplies the result; alternatively, assign `result`.
+
+Use bare functions such as `sum`, `min`, `max`, `len`, `range`, `int`, `float`,
+`bool`, `round`, `sqrt`, `sin`, `cos`, `atan2`, `radians` and `hypot`, with
+constants `pi`, `e` and `tau`. Strings, dictionaries, attributes, imports,
+classes, lambdas, generators, sequence repetition and slice assignment are
+unavailable. Unsupported syntax is rejected even in branches that would not
+run. The [interpreter policy](../workbench/services/calculations.py) gives the
+exact function list, accepted forms and additional argument restrictions.
+
+For example, ask the chat to filter the explicit numeric samples
+`[1, 0, 0, 0]` using Code. A small biquad implementation can use:
+
+```python
+def biquad(samples, b0, b1, b2, a1, a2):
+    y = [0.0 for sample in samples]
+    x1 = 0.0
+    x2 = 0.0
+    y1 = 0.0
+    y2 = 0.0
+    for i in range(len(samples)):
+        x = samples[i]
+        value = b0*x + b1*x1 + b2*x2 - a1*y1 - a2*y2
+        y[i] = value
+        x2 = x1
+        x1 = x
+        y2 = y1
+        y1 = value
+    return y
+
+biquad(data, 0.1875, 0.375, 0.1875, -0.5, 0.25)
+```
+
+With `data` set to `[1, 0, 0, 0]`, the result is
+`[0.1875, 0.46875, 0.375, 0.0703125]`. These coefficients include both feedback
+terms in the biquad recurrence. The model receives the numeric observation for
+its normal reply. Each call has fixed caps:
+
+| Resource | Limit |
+| --- | --- |
+| Source and syntax | 32 KiB ASCII source, 4,096 AST nodes, depth 48 |
+| Work | 2,000,000 operations and 200,000 total loop iterations |
+| Evaluation nesting | 128 combined levels for statements, expressions and comprehensions, including function execution |
+| Lists and tuples | 65,536 items each, 1,048,576 cumulative allocated slots, expanded value size 262,144, value depth 12 |
+| Variables and functions | 256 bindings per frame, 64 custom functions, call depth 16, 64 positional arguments |
+| Numbers | 256-bit integers; finite float magnitude at most `1e100`; exponent magnitude at most 1,024; shifts from 0 through 255 |
+| Result | 64 KiB of encoded JSON |
+
+Invalid source or data returns a bounded error observation that the model may
+correct within the existing local-tool budget: eight calls per request and four
+tool rounds per model reply sequence. Agentic model-call and token budgets still
+apply. Code results carry no instruction authority. Helper requests opt in with
+`"selector": {"calculations": true}`; the field must be boolean, defaults to
+`false`, and can be enabled only for `chat` or `agent` operations. A Markdown code
+fence by itself does not run Code.
+
 ## Providers and research
 
 The AI pane selects a provider, endpoint, model and supported generation
@@ -603,7 +733,8 @@ Defaults are saved in `ai-defaults.json` under `$XDG_CONFIG_HOME/tinyEnv` on
 Linux, falling back to `~/.config/tinyEnv`; macOS uses
 `~/Library/Application Support/tinyEnv`, and Windows uses `%APPDATA%/tinyEnv`.
 The same application preferences file remembers the configured model list,
-Tutorial and Developer. Each can be saved separately from the active AI defaults.
+Tutorial, Developer and Sidebar visibility (`right_sidebar_visible`, default
+`true`). Each can be saved separately from the active AI defaults.
 Legacy nonsecret OpenRouter guardrail IDs remain readable, but the AI pane no
 longer exposes guardrail-management controls. Its schema version is 2; existing
 version-1 defaults remain readable and preserve their explicitly saved numeric values. Loading them
@@ -825,9 +956,72 @@ cross-references and diverse keywords to source text. The original text and
 annotation provenance remain available so a smaller model can use a large
 knowledgebase and a local keyword index can find related passages. Keyword
 diversity supplements complete source context; it does not replace the source
-with a summary. A folder's contextual action opens the builder. Its large-model
-and smaller comprehension-model fields start blank; choose them explicitly
-before an AI build or evaluation.
+with a summary. Open **Build Scribble / Ref…** from Selector, Files, or a file or
+folder's right-click actions. Open a chat first to own the task. This enters the
+full **Scribble builder** workspace, with **Setup**, **Tasks** and **Results** tabs.
+It preserves the chat's composer and history. Selector initially supplies the
+project root; Files/actions initially supply the selected path, or the current
+directory. Reentering the workspace restores that chat's saved setup, tab and
+selection. Source paths are relative to the project root (`.` means that root)
+or explicitly absolute. Build requires a fresh output directory inside this
+project; an absolute output path is accepted only when it stays within the
+project root. Resume uses the saved task's output directory. Ordinary chat context
+and Tools selections are not automatically added as builder inputs.
+
+**Exit Scribble builder** restores the normal workbench and retains the setup,
+drafts and task records. A running task continues after this exit. Escape does
+not leave the workspace or cancel a task. **New task** explicitly resets setup
+to its defaults while retaining earlier records, initially selecting the Files
+item or current browsed directory as its source. Each chat can retain at most
+32 task records and can run only one worker at a time. Tasks start only from an
+explicit action; there is no automatic background queue. Opening a project,
+restoring a chat, or reentering the builder starts no work. Closing the application
+interrupts a running worker; saved running records become **interrupted** when
+reopened.
+
+In **Tasks**, **Pause** stops a running Scribble build; **Cancel task** explicitly
+cancels the selected running task. On supported POSIX hosts, **Resume Scribble**
+continues a paused, interrupted or failed Scribble task using its saved request.
+The saved project root and owning chat must still match. A saved task whose
+initial launch did not start can offer **Start saved Scribble**, which explicitly
+starts its original build. Resume requires a valid checkpoint and never silently
+starts a fresh build if it is missing or invalid. A failure before the initial
+manifest was saved may require **New task** with a fresh output directory.
+**Show Results** selects the retained result. **Remove record** removes only a
+nonrunning task record; generated output and checkpoint files remain on disk.
+
+**Results** keeps builder progress, failures and output metadata separate from
+chat replies. **View generated Scribble** opens the generated Markdown in the
+ordinary file editor. **Use as Scribble** and **Use as Ref** explicitly add and
+enable the saved output directory in the owning chat's corresponding Selector
+list. Saved result metadata is bounded to 128 KiB per record; builder setup,
+task requests and results together have a 1 MiB aggregate saved-state limit.
+Larger result metadata can be compacted with an explicit omission marker.
+A state-size error may require removing retained records or using a new chat.
+The generated files remain available independently of the retained metadata.
+
+The builder starts in **Local source index · no AI or network** mode. **Build
+local index** preserves source chunks, anchors, local keywords and related-chunk
+links without AI enrichment, model selection or credentials. It makes no model
+or network requests. Choose **AI annotations · OpenRouter** explicitly to reveal
+the annotation settings and **Build with AI** action. Enter an OpenRouter model
+ID manually, or explicitly choose an entry from compatible configured models.
+Built-in model examples appear only with Tutorial enabled. The annotation and
+evaluation model IDs start blank; examples are neither defaults nor availability
+claims. OpenAI models remain prohibited for generation and evaluation.
+
+AI builds can explicitly enable **Limited research for Build**, using the
+research source selected in Selector.
+
+The separate **Comprehension evaluation (uses OpenRouter)** checkbox reveals
+the evaluation model and questions. **Evaluate existing** starts that AI
+operation against an existing output index; enabling the fields alone starts
+no request. It uses the saved index and supplied questions without research.
+Choose its model explicitly even when the builder is in local mode.
+**Cancel evaluation** stops a running evaluation. **Retry evaluation** explicitly
+creates a new evaluation task and makes new provider calls against the saved
+index and questions, without research. Evaluation has no resumable pair
+checkpoint; it does not reuse a partly completed comparison as a resumed build.
 
 AI annotations use a bounded structured response for a moniker, diverse
 keywords, description, commentary, relationships and nuance. Their validated
@@ -841,8 +1035,34 @@ source chunks with line references, collapsible annotations and links between
 related chunks. The index records source/chunk hashes, diverse keywords,
 commentary and cross-references. Evidence records skipped inputs, configured
 budgets, provider/model identity and hashes of generated artifacts. AI
-annotations are labeled unverified. Existing output artifacts are refused;
-use a fresh destination for a new build.
+annotations are labeled unverified. Existing output artifacts are refused for
+a new build; choose a fresh destination. Resume can finish its own interrupted
+publication after verifying the saved artifacts' identity and exact bytes.
+It refuses foreign or colliding artifacts, even if their bytes match. The three
+completed artifact names and version-1 schemas remain unchanged. Add the output
+**directory** to Selector's Scribbles or Refs list and enable it to use the
+verified index; selecting only `scribbles.md` instead loads bounded raw text.
+
+Qualified POSIX builds retain a hidden sibling checkpoint directory named
+`.tinyenv-scribble-<digest>.checkpoint`, where the digest is the first 32 hex
+digits of the SHA-256 hash of the absolute output path. Its immutable manifest
+binds source bytes and file identity, selected paths, build configuration,
+provider/model settings and prepared request context. Completed annotation
+responses and their provenance are saved incrementally. Resume verifies those
+bindings before reusing annotations or requesting annotation generation. Changed
+sources, settings, provider context, malformed or modified checkpoints, unsafe
+paths, active checkpoint locks and colliding output data are refused. Only durably saved completed annotations are
+reused. An interrupted request whose response was not saved may repeat on an
+explicit Resume.
+
+A resumed build uses its retained research context and provenance, without new
+research searches. Checkpointed research provenance is marked
+`checkpoint_reused: true`. Checkpoints contain source/context and annotation data
+and remain on disk after success or removal of a task record. Resume requires
+qualified POSIX no-follow, directory-descriptor and file-lock operations.
+Windows fresh builds remain available without checkpoints; Resume is unavailable
+there. The macOS desktop worker bridge remains unavailable. These platform
+boundaries are implementation limits, not native qualification results.
 
 Default source budgets are 128 files, 4 MiB per file, 16 MiB total and 1,024
 chunks of 16 KiB. Source reads use bounded chunks and preserve exact included
@@ -851,11 +1071,19 @@ content, symlinks, changed or over-budget inputs are reported as skipped.
 Larger explicit source budgets do not enlarge an AI model's context
 window. The runtime's selected-context budget must be chosen separately;
 it reports truncation rather than claiming the entire knowledgebase was sent.
-AI annotation defaults to at most 32 provider calls; a build that would exceed
-that limit fails before generation. The builder's explicit annotation-call
-budget accepts one to 4,096 calls. An explicit runtime request can set
-`scribble.max_provider_calls` up to 4,096, without altering the small
-qualification budget.
+AI annotation defaults to at most 32 provider calls; the selected build's planned
+chunks must fit that limit before generation. The builder's explicit
+annotation-call budget accepts one to 4,096 calls. An explicit runtime request
+can set `scribble.max_provider_calls` up to 4,096, without altering the small
+qualification budget. The checkpoint binds this budget, so changing it requires
+a new task. Resume calls only unfinished chunks. The cap applies to each
+explicit Build or Resume invocation and is not a lifetime attempt or cost cap:
+resuming can repeat an interrupted request whose response was not saved.
+Current `usage` counts newly executed work. `usage.reused_research` separately
+records saved research usage and `usage.reused_scribble` records known usage for
+reused annotations. Final `evidence.json` provider-call totals include the saved
+successful annotations and new successful work; unknown usage from failed
+requests is not invented.
 Comprehension evaluation compares identical selected source chunks with and
 without annotations and records actual cases. A build alone reports no
 comprehension improvement.
@@ -868,7 +1096,8 @@ python3 -I -B build/workbench-fltk-release/runtime/runtime.py --request /absolut
 ```
 
 For example, this creates a local source-preserving index without AI or network
-access; substitute an existing project root and use a fresh output directory:
+access; substitute an existing project root and use a fresh output directory
+inside that root:
 
 ```json
 {
@@ -882,13 +1111,33 @@ access; substitute an existing project root and use a fresh output directory:
 }
 ```
 
+To resume a checkpointed Scribble request, explicitly set
+`scribble.resume: true` and retain its original root, inputs, output directory and
+bound configuration. The field accepts only a JSON boolean and defaults to
+`false`. Resume is an explicit operation; restoring saved desktop state does not
+set it or launch a worker automatically.
+
 By default the helper prints one JSON result and exits with status 1 on an error.
-Chat and agent requests can set top-level `stream: true` to receive bounded NDJSON
-`start`, `delta` and `final` frames with `stream_version: 1` and contiguous sequence
-numbers. Deltas describe the current visible answer; replacement updates and the
-final result replace its preview. `stream: true` is rejected for other operations.
-The unchanged `--request` CLI selects streaming from the request JSON, and the desktop also
-accepts legacy workers that return one JSON result.
+Chat, agent and Scribble requests can set top-level `stream: true` to receive
+bounded NDJSON with `stream_version: 1` and contiguous sequence numbers. Chat and
+agent use `start`, `delta` and `final` frames. Deltas describe the current visible
+answer; replacement updates and the final result replace its preview.
+
+Scribble uses `start`, typed `progress` and `final` frames, without assistant-text
+deltas. Each progress frame has exactly `stream_version`, `event: "progress"`,
+`sequence`, `phase`, `completed_chunks`, `total_chunks` and `resumed_chunks`.
+The phases are `preparing`, `indexing`, `enriching`, `publishing` and `completed`.
+Chunk counts are integers from zero to 4,096, with
+`resumed_chunks <= completed_chunks <= total_chunks`. At most 4,096 progress
+frames of at most 1,024 encoded bytes are emitted; the transport may coalesce
+updates while retaining the largest reported chunk counts and final completion. The desktop displays this progress in
+the builder workspace, separately from the chat transcript. The final result is
+the authoritative result metadata.
+
+`stream: true` is rejected for other operations, including evaluation, which
+returns one buffered JSON result. The unchanged `--request` CLI selects streaming
+from the request JSON, and the desktop also accepts legacy workers that return
+one JSON result.
 
 An `operation: "agent"` request must put exactly one closed supported flow fence in
 its current `prompt`. Its optional `pseudocode` field is an integrity check and

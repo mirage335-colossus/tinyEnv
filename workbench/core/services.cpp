@@ -338,7 +338,7 @@ struct Job::Impl {
     OutputFormat output_format{OutputFormat::undecided};
     bool stream_requested{};
     std::string operation;
-    std::size_t output_offset{}, next_sequence{}, delta_count{};
+    std::size_t output_offset{}, next_sequence{}, delta_count{}, progress_count{};
     std::optional<json::Value> final_response;
     std::string python;
     Impl(std::size_t bytes, std::filesystem::path script, std::string executable, std::filesystem::path credentials)
@@ -347,7 +347,7 @@ struct Job::Impl {
     void reset_output(const json::Value& request) {
         output_format = OutputFormat::undecided;
         stream_requested = false;
-        operation.clear(); output_offset = next_sequence = delta_count = 0;
+        operation.clear(); output_offset = next_sequence = delta_count = progress_count = 0;
         final_response.reset();
         if (const auto* stream = request.find("stream")) {
             if (!std::holds_alternative<bool>(stream->data))
@@ -356,8 +356,8 @@ struct Job::Impl {
             if (stream_requested) {
                 const auto* selected = request.find("operation");
                 if (!selected || !std::holds_alternative<std::string>(selected->data) ||
-                    (selected->string() != "chat" && selected->string() != "agent"))
-                    throw std::invalid_argument("Runtime streaming supports only chat and agent operations");
+                    (selected->string() != "chat" && selected->string() != "agent" && selected->string() != "scribble"))
+                    throw std::invalid_argument("Runtime streaming supports only chat, agent and Scribble operations");
                 operation = selected->string();
             }
         }
@@ -389,7 +389,7 @@ struct Job::Impl {
                     field(frame, "operation").string() == operation);
             status.streaming = true;
         } else if (event == "delta") {
-            require(frame.object().size() == 5 && delta_count < 4096 && encoded_bytes <= 16 * 1024);
+            require(operation != "scribble" && frame.object().size() == 5 && delta_count < 4096 && encoded_bytes <= 16 * 1024);
             const auto& text = field(frame, "text").string();
             const auto replace = field(frame, "replace").boolean();
             require(text.size() <= 16 * 1024);
@@ -399,6 +399,25 @@ struct Job::Impl {
                 if (!text.empty()) { status.partial_text += text; ++status.stream_revision; }
             }
             ++delta_count;
+        } else if (event == "progress") {
+            require(operation == "scribble" && frame.object().size() == 7 && progress_count < 4096 && encoded_bytes <= 1024);
+            const auto& phase = field(frame, "phase").string();
+            require(phase == "preparing" || phase == "indexing" || phase == "enriching" ||
+                    phase == "publishing" || phase == "completed");
+            const auto count = [&](std::string_view key) {
+                const auto value = field(frame, key).number();
+                require(std::isfinite(value) && value >= 0 && value <= 4096 && std::floor(value) == value);
+                return static_cast<std::size_t>(value);
+            };
+            const auto completed = count("completed_chunks"), total = count("total_chunks"), resumed = count("resumed_chunks");
+            require(resumed <= completed && completed <= total);
+            if (phase != status.progress_phase || completed != status.completed_chunks ||
+                total != status.total_chunks || resumed != status.resumed_chunks) {
+                status.progress_phase = phase; status.completed_chunks = completed;
+                status.total_chunks = total; status.resumed_chunks = resumed;
+                ++status.progress_revision;
+            }
+            ++progress_count;
         } else if (event == "final") {
             require(frame.object().size() == 4);
             auto response = field(frame, "result");
@@ -406,10 +425,10 @@ struct Job::Impl {
             const auto* text = response.find("text");
             if (field(response, "ok").boolean()) {
                 require(text && std::holds_alternative<std::string>(text->data));
-                set_partial(text->string());
+                if (operation != "scribble") set_partial(text->string());
             } else if (text) {
                 require(std::holds_alternative<std::string>(text->data));
-                if (!text->string().empty()) set_partial(text->string());
+                if (operation != "scribble" && !text->string().empty()) set_partial(text->string());
             }
             final_response = std::move(response);
         } else require(false);

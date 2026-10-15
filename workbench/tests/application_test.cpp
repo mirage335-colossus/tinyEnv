@@ -18,6 +18,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -137,7 +138,8 @@ struct Session {
         return out;
     }
     void presented(std::string_view step) const {
-        require(!application->presentation_pending(), std::string(step) + ": presentation pending");
+        require(!application->presentation_pending(), std::string(step) + ": presentation pending; " +
+                (find(view(),"wb.status")?widget(view(),"wb.status").state.text:std::string("no status")));
         require(adapter.snapshot().revision == view().revision,
                 std::string(step) + ": adapter has an obsolete snapshot");
         std::set<std::string> ids;
@@ -159,7 +161,7 @@ struct Session {
     }
     void reveal(std::string_view id) {
         const auto& control = widget(view(), id);
-        if (control.spec.parent != "wb.right") return;
+        if (control.spec.parent != "wb.right" && control.spec.parent != "modal.root" && control.spec.parent != "builder.body") return;
         const auto target = control.spec.key;
         const auto fully_visible = [](const gui::Availability& area) {
             constexpr double tolerance = 1e-7;
@@ -169,7 +171,7 @@ struct Session {
                 area.clip.y + area.clip.height + tolerance >= area.bounds.y + area.bounds.height;
         };
         if (fully_visible(adapter.resolved_availability(target))) return;
-        const auto& group = widget(view(), "wb.right");
+        const auto& group = widget(view(), control.spec.parent);
         const auto frame = adapter.resolved_availability(group.spec.key);
         auto viewport = frame.clip;
         if (group.state.content_clip) {
@@ -3600,6 +3602,488 @@ void transcription_validation(const std::filesystem::path& captures) {
             "Invalid transcription launched a job or wrote project files");
 }
 
+void sidebar_visibility_retains_controls_and_is_global() {
+    Temporary fixture;
+    const auto project=fixture.root/"project",config=fixture.root/"config";
+    write(project/"first.chat.md",long_transcript("Sidebar first"));
+    write(project/"second.chat.md","# Sidebar second\n");
+    Session session(project,"first.chat.md",config);
+    require(widget(session.view(),"wb.sidebar").state.checked&&find(session.view(),"wb.right"),
+            "The right sidebar did not default to visible");
+    require(session.adapter.send(gui::ResizeEvent{{900,640},1})==gui::Delivery::delivered,
+            "Sidebar fixture could not resize");
+    session.activate("tab.right.Selector");
+    session.edit("selector.path","source.txt");session.activate("selector.add");
+    session.select("selector.paths","source.txt");
+    session.edit("selector.path","Retained unsubmitted path");
+    const auto path_key=widget(session.view(),"selector.path").spec.key;
+    session.adapter.text_selection(path_key,{3,11});
+    const auto right_offset=session.adapter.scroll_offset(widget(session.view(),"wb.right").spec.key);
+    const auto old_calculations=widget(session.view(),"selector.calculations").spec.key;
+    const auto old_right_tab=widget(session.view(),"tab.right.AI").spec.key;
+    const auto old_middle=widget(session.view(),"wb.center").state.bounds;
+    const auto old_right=widget(session.view(),"wb.right").state.bounds;
+    session.edit("wb.composer","Retain this draft.");
+    const auto composer=widget(session.view(),"wb.composer").spec.key;
+    require(session.adapter.focus(composer),"Cannot focus sidebar fixture composer");
+    session.adapter.text_selection(composer,{2,8});
+    scroll_transcript(session,30);
+    session.check("wb.sidebar",false);
+    require(!find(session.view(),"wb.right")&&!find(session.view(),"tab.right.AI")&&
+            !find(session.view(),"selector.calculations")&&
+            widget(session.view(),"wb.sidebar").spec.parent=="wb.root"&&
+            fully_visible(session.adapter.resolved_availability(widget(session.view(),"wb.sidebar").spec.key)),
+            "Hidden sidebar retained controls or hid its global restore checkbox");
+    near(widget(session.view(),"wb.center").state.bounds.width,old_middle.width+old_right.width+8,
+         "Hidden sidebar did not return its width to the center");
+    require(session.adapter.focused()==composer&&session.adapter.text_selection(composer)==gui::TextSelection{2,8}&&
+            session.text("wb.composer")=="Retain this draft.",
+            "Sidebar hiding changed composer identity, focus, selection or draft");
+    const auto epoch=session.application->input_epoch();
+    require(session.adapter.send(gui::WidgetEvent{old_calculations,gui::SetChecked{true}})==gui::Delivery::ignored&&
+            session.adapter.send(gui::WidgetEvent{old_right_tab,gui::Activate{}})==gui::Delivery::ignored&&
+            session.application->input_epoch()==epoch,
+            "Hidden sidebar accepted stale controls");
+    for(const auto& binding:session.view().key_bindings)
+        require(!binding.target.id.starts_with("selector.")&&!binding.target.id.starts_with("ai.")&&
+                (!binding.focus||!binding.focus->id.starts_with("selector.")),
+                "Hidden sidebar leaked a keyboard target");
+    session.edit("wb.composer","Retain this draft. More");
+    session.shortcut("wb.composer",gui::ShortcutKey::z);
+    require(session.text("wb.composer")=="Retain this draft.","Hidden sidebar broke focused composer undo");
+    session.check("wb.sidebar",true);
+    require(session.text("selector.path")=="Retained unsubmitted path"&&
+            widget(session.view(),"selector.paths").state.selected=="source.txt"&&
+            session.adapter.text_selection(widget(session.view(),"selector.path").spec.key)==gui::TextSelection{3,11},
+            "Restoring sidebar discarded its field or list selection");
+    require(session.adapter.scroll_offset(widget(session.view(),"wb.right").spec.key)==right_offset,
+            "Restoring sidebar discarded its scroll position");
+    require(session.adapter.focused()==composer&&transcript_offset(session)<=30,
+            "Restoring sidebar stole composer focus or resumed transcript following");
+    session.activate("tab.center.Pseudocode Editor");
+    const auto graph_width=widget(session.view(),"wb.flow.canvas").state.bounds.width;
+    const auto draft_before=session.text("wb.flow.text");
+    session.check("wb.sidebar",false);
+    require(widget(session.view(),"wb.flow.canvas").state.bounds.width>graph_width&&
+            session.text("wb.flow.text")==draft_before,
+            "Hidden sidebar failed to expand the flow canvas or changed source");
+    session.chat("second.chat.md");
+    require(!find(session.view(),"wb.right")&&!widget(session.view(),"wb.sidebar").state.checked,
+            "Chat switching reset the global sidebar preference");
+    session.application->shutdown();
+    std::filesystem::create_directory(fixture.root/"other-project");
+    Session reopened(fixture.root/"other-project",{},config);
+    require(!find(reopened.view(),"wb.right")&&!widget(reopened.view(),"wb.sidebar").state.checked,
+            "Sidebar preference did not survive project change and restart");
+    reopened.check("wb.sidebar",true);
+    require(find(reopened.view(),"wb.right")&&AiPreferences(config).right_sidebar_visible(),
+            "Empty workspace could not restore and persist the sidebar");
+}
+
+void hidden_sidebar_reveals_ai_and_preserves_preference_conflicts() {
+    Temporary fixture;
+    const auto project=fixture.root/"project",config=fixture.root/"config";
+    write(project/"chat.chat.md","# Sidebar repair\n");
+    AiSettings defaults;defaults.provider="ollama";defaults.model="remembered-default";
+    AiPreferences(config).save(defaults);
+    Session session(project,"chat.chat.md",config);
+    session.activate("tab.right.AI");session.edit("ai.model","");
+    session.edit("wb.composer","Keep the repair draft.");
+    session.check("wb.sidebar",false);
+    AiPreferences external(config);external.set_tutorial_mode(true);
+    const auto external_bytes=read(config/"ai-defaults.json");
+    session.check("wb.sidebar",true);session.error("changed");
+    require(!find(session.view(),"wb.right")&&!widget(session.view(),"wb.sidebar").state.checked&&
+            read(config/"ai-defaults.json")==external_bytes,
+            "A conflicting manual sidebar write changed visibility or replaced external preferences");
+    const auto composer=widget(session.view(),"wb.composer").spec.key;
+    require(session.adapter.focus(composer),"Cannot focus repair draft");
+    session.adapter.text_selection(composer,{1,7});
+    session.shortcut("wb.composer",gui::ShortcutKey::enter);
+    session.error("Choose a model in AI");
+    require(find(session.view(),"ai.model")&&widget(session.view(),"wb.sidebar").state.checked&&
+            fully_visible(session.adapter.resolved_availability(widget(session.view(),"ai.model").spec.key))&&
+            session.text("wb.status").find("could not remember")!=std::string::npos&&
+            read(config/"ai-defaults.json")==external_bytes&&AiPreferences(config).defaults()==defaults&&
+            session.text("wb.composer")=="Keep the repair draft."&&
+            session.adapter.focused()==composer&&session.adapter.text_selection(composer)==gui::TextSelection{1,7},
+            "AI repair stayed hidden, stole focus, consumed the draft or replaced remembered defaults on conflict");
+    session.application->shutdown();
+    const auto isolated_config=fixture.root/"selection-config";
+    write(project/"second.chat.md","# Separate hidden AI selections\n");
+    Workspace workspace(project);auto second=workspace.open_chat("second.chat.md");
+    second.state.ai.provider="ollama";second.state.ai.model="invalid model two";second.state.ai_configured=true;
+    workspace.save_state(second);
+    Session separate(project,"chat.chat.md",isolated_config);
+    separate.activate("tab.right.AI");separate.choose("ai.provider","ollama");separate.edit("ai.model","invalid model one");
+    separate.adapter.text_selection(widget(separate.view(),"ai.model").spec.key,{2,8});
+    separate.check("wb.sidebar",false);separate.chat("second.chat.md");separate.edit("wb.composer","Repair this chat only.");
+    separate.activate("wb.send");separate.error("Model ID is invalid");
+    require(separate.text("ai.model")=="invalid model two"&&
+            separate.adapter.text_selection(widget(separate.view(),"ai.model").spec.key)==gui::TextSelection{0,0},
+            "AI repair restored another chat's hidden field selection");
+}
+
+void code_is_an_explicit_chat_option() {
+#if defined(__linux__) || defined(_WIN32)
+    Temporary fixture;
+    const auto project=fixture.root/"project",config=fixture.root/"config";
+    write(project/"first.chat.md","# First Code chat\n");write(project/"second.chat.md","# Second Code chat\n");
+    const auto worker=offline_chat_worker(fixture.root);
+    {
+        Session session(project,"first.chat.md",config,true,worker);
+        const auto& code=widget(session.view(),"selector.calculations").state;
+        require(code.label=="Code"&&code.accessible_name=="Code"&&!code.checked,
+                "Code omitted its visible/accessibility label or defaulted on");
+        require(code.help.find("Python-shaped algorithms on numeric arrays")!=std::string::npos&&
+                code.help.find("No imports, files, network or shell")!=std::string::npos,
+                "Code omitted its bounded array algorithm capability description");
+        session.check("selector.calculations",true);
+        require(session.text("wb.status")=="Code enabled for this chat.","Code enable status used an obsolete tool name");
+        session.activate("tab.right.Sources");
+        require(session.text("wb.sources").find("Code: enabled for this chat.")!=std::string::npos,
+                "Sources omitted this chat's enabled Code summary");
+        session.activate("tab.right.Selector");
+        session.chat("second.chat.md");
+        require(!widget(session.view(),"selector.calculations").state.checked,
+                "Code leaked into another chat");
+        session.chat("first.chat.md");
+        require(widget(session.view(),"selector.calculations").state.checked&&
+                Workspace(project).open_chat("first.chat.md").state.selector.calculations,
+                "Code was not retained in its owning chat state");
+    }
+    Session reopened(project,"first.chat.md",config,true,worker);
+    require(widget(reopened.view(),"selector.calculations").state.checked,
+            "Code did not survive restart");
+    reopened.activate("tab.right.AI");reopened.choose("ai.provider","ollama");reopened.edit("ai.model","offline-code-model");
+    reopened.edit("wb.composer","Use the enabled Code tool.");reopened.check("wb.sidebar",false);
+    reopened.shortcut("wb.composer",gui::ShortcutKey::enter);
+    wait_for(reopened,[&]{return !widget(reopened.view(),"wb.cancel").state.enabled;},"Code request completion");
+    const auto request=json::parse(read(fixture.root/"first.chat.md.request.json"));
+    require(request.find("selector")->find("calculations")->boolean()&&!find(reopened.view(),"wb.right"),
+            "Hidden sidebar dropped the enabled Code flag or was opened by a successful Send");
+    reopened.check("wb.sidebar",true);reopened.activate("tab.right.Selector");reopened.check("selector.calculations",false);
+    require(reopened.text("wb.status")=="Code disabled for this chat.","Code disable status used an obsolete tool name");
+    reopened.activate("tab.right.Sources");
+    require(reopened.text("wb.sources").find("Code: off for this chat.")!=std::string::npos,
+            "Sources omitted this chat's disabled Code summary");
+    reopened.activate("wb.retry");
+    wait_for(reopened,[&]{return !widget(reopened.view(),"wb.cancel").state.enabled;},"Code-disabled retry completion");
+    require(!json::parse(read(fixture.root/"first.chat.md.request.json")).find("selector")->find("calculations")->boolean(),
+            "Retry reused an old Code permission after it was disabled");
+#endif
+}
+
+void builder_discovery_and_modes_are_explicit() {
+    Temporary fixture;
+    const auto project=fixture.root/"project",config=fixture.root/"config";
+    std::filesystem::create_directory(project);
+    {
+        Session empty(project,{},config);
+        require(!widget(empty.view(),"selector.builder").state.enabled&&
+                widget(empty.view(),"selector.builder").state.help.find("chat")!=std::string::npos,
+                "Selector builder did not explain that an owning chat is required");
+        empty.activate("tab.left.Files");
+        require(!widget(empty.view(),"wb.files.builder").state.enabled&&inventory(project).empty(),
+                "Files builder implicitly created a chat");
+    }
+#if defined(__linux__) || defined(_WIN32)
+    write(project/"chat.chat.md","# Builder discovery\n");write(project/"input.txt","Source input\n");
+    Workspace builder_workspace(project);auto builder_chat=builder_workspace.open_chat("chat.chat.md");
+    const auto stale_path=(fixture.root/"missing unrelated context").string();
+    builder_chat.state.selector.scribbles={{stale_path,true}};builder_chat.state.selector.refs={{stale_path,true}};
+    builder_chat.state.selector.tools={{stale_path,true}};builder_chat.state.selector.kiwix_index=stale_path;
+    builder_workspace.save_state(builder_chat);
+    AiPreferences preferences(config);
+    preferences.save_configured_models({{"openrouter",{},"deepseek/deepseek-r1-0528","My explicit model"},
+                                       {"ollama",{},"local-model","Different provider"}});
+    const auto worker=fixture.root/"offline builder worker.py";
+    write(worker,R"PY(import json, os, sys
+assert sys.flags.isolated and sys.flags.no_user_site
+with open(sys.argv[2], encoding='utf-8') as stream:
+    request=json.load(stream)
+assert request['operation'] in ('scribble', 'evaluate', 'models')
+base=os.path.dirname(__file__)
+with open(os.path.join(base, 'builder.'+request['operation']+'.json'), 'w', encoding='utf-8') as stream:
+    json.dump(request,stream)
+if request['operation']=='models':
+    print(json.dumps({'ok':True,'models':[]}))
+else:
+    assert request['selector']['calculations'] is False
+    if request['operation']=='evaluate':
+        assert request['selector']['deep_research'] is False
+        assert 'research_queries' not in request
+        assert request['allowed_context_paths']==[]
+        assert 'input_paths' not in request
+    if not request['scribble']['ai_enabled'] and request['operation']=='scribble':
+        assert request['settings']['network_enabled'] is False
+        assert request['settings']['model']==''
+        assert request['selector']['deep_research'] is False
+        assert 'research_queries' not in request
+        assert request['allowed_context_paths']==[]
+        assert all(request['selector'][kind]==[] for kind in ('scribbles','refs','tools'))
+        assert 'kiwix_index' not in request and 'research_paths' not in request
+    print(json.dumps({'ok':True,'text':'Local builder fixture completed.','sources':[]}))
+)PY");
+    Session session(project,"chat.chat.md",config,true,worker);
+    session.adapter.send(gui::ResizeEvent{{900,640},1});
+    session.edit("wb.composer","Preserve builder draft.");session.check("selector.calculations",true);
+    session.choose("selector.kind","refs");
+    session.activate("selector.builder");
+    require(session.text("builder.paths")=="."&&session.text("builder.output")==".zzz_compendium/refs/project"&&
+            widget(session.view(),"builder.ai").state.selected=="false"&&!find(session.view(),"builder.model")&&
+            !find(session.view(),"builder.web")&&!find(session.view(),"builder.small_model")&&
+            session.text("builder.output_help").find("output DIRECTORY")!=std::string::npos&&
+            !std::filesystem::exists(fixture.root/"builder.scribble.json"),
+            "Visible Selector builder omitted root/Ref defaults, started AI or hid its output instructions");
+    session.choose("builder.kind","scribbles");
+    require(session.text("builder.output")==".zzz_compendium/scribbles/project",
+            "Builder kind did not adjust its untouched output suggestion");
+    session.edit("builder.output","chosen-index");session.choose("builder.kind","refs");
+    require(session.text("builder.output")=="chosen-index","Builder kind replaced an explicit output path");
+    session.choose("builder.ai","true");
+    require(session.text("builder.model").empty()&&option(widget(session.view(),"builder.model_choice"),"deepseek/deepseek-r1-0528")&&
+            !option(widget(session.view(),"builder.model_choice"),"moonshotai/kimi-k3")&&
+            !option(widget(session.view(),"builder.model_choice"),"local-model"),
+            "Builder implicitly selected a model, exposed hidden Tutorial examples or included another provider's model");
+    session.choose("builder.model_choice","deepseek/deepseek-r1-0528");
+    require(session.text("builder.model")=="deepseek/deepseek-r1-0528","Configured builder model was not editable in the Model ID field");
+    session.edit("builder.model","openai/gpt-5");session.activate("builder.run");session.error("OpenAI");
+    require(!session.view().modal_root&&find(session.view(),"builder.exit")&&!std::filesystem::exists(fixture.root/"builder.scribble.json"),
+            "Prohibited builder model launched a task or discarded editable settings");
+    session.edit("builder.model","moonshotai/kimi-k3");session.edit("builder.max_calls","not a number");session.choose("builder.web","true");
+    session.choose("builder.ai","false");
+    session.activate("builder.run");
+    wait_for(session,[&]{return !widget(session.view(),"builder.task.pause").state.enabled;},"local builder request completion");
+    session.success("local builder request");
+    const auto local=json::parse(read(fixture.root/"builder.scribble.json"));
+    session.activate("builder.exit");
+    require(local.find("output_dir")->string()=="chosen-index"&&local.find("input_paths")->array().front().string()=="."&&
+            local.find("scribble")->find("max_provider_calls")->number()==32&&
+            session.text("wb.composer")=="Preserve builder draft."&&
+            widget(session.view(),"selector.paths").state.records.size()==1&&
+            widget(session.view(),"selector.paths").state.records.front().id==stale_path,
+            "Explicit local Build failed on irrelevant AI fields, lost its source/output/draft or silently enabled context");
+    session.activate("selector.builder");session.activate("tab.builder.Setup");session.choose("builder.ai","true");session.choose("builder.web","true");
+    session.edit("builder.max_calls","unused invalid annotation setting");session.choose("builder.ai","false");
+    session.check("builder.evaluation",true);session.edit("builder.small_model","custom/evaluation-model");
+    session.edit("builder.paths",stale_path);
+    require(!find(session.view(),"builder.web"),"Local mode kept the annotation research control visible");
+    session.activate("builder.evaluate");
+    wait_for(session,[&]{return !widget(session.view(),"builder.task.pause").state.enabled;},"explicit local-index evaluation completion");
+    session.success("evaluation without stale annotation research");
+    const auto evaluation=json::parse(read(fixture.root/"builder.evaluate.json"));
+    require(!evaluation.find("selector")->find("deep_research")->boolean()&&!evaluation.find("research_queries")&&
+            evaluation.find("settings")->find("model")->string()=="custom/evaluation-model",
+            "Explicit evaluation used hidden stale web/call controls or replaced its chosen model");
+    session.activate("builder.exit");session.activate("tab.left.Files");session.select("wb.files","input.txt");session.activate("wb.files.builder");
+    require(session.text("builder.task.status").find("completed")!=std::string::npos,"Files reentry discarded the retained builder tab/task");
+    session.activate("builder.new");
+    require(session.text("builder.paths")=="input.txt"&&session.text("builder.output")==".zzz_compendium/scribbles/input.txt",
+            "Explicit New task did not default to the selected Files source");
+    session.activate("builder.exit");session.activate("tab.left.Chats");session.check("wb.tutorial",true);
+    session.activate("selector.builder");session.choose("builder.ai","true");
+    require(option(widget(session.view(),"builder.model_choice"),"moonshotai/kimi-k3")&&session.text("builder.model").empty(),
+            "Explicit Tutorial mode did not reveal examples or selected a model implicitly");
+    session.edit("builder.model","custom/reviewed-model");session.activate("builder.run");
+    wait_for(session,[&]{return !widget(session.view(),"builder.task.pause").state.enabled;},"explicit AI builder request completion");
+    require(json::parse(read(fixture.root/"builder.scribble.json")).find("settings")->find("model")->string()=="custom/reviewed-model",
+            "Manual builder model ID was replaced by a fixed choice");
+    session.activate("builder.exit");session.activate("tab.right.AI");session.activate("ai.models.refresh");
+    session.check("wb.sidebar",false);session.activate("tab.left.Running Tasks");
+    wait_for(session,[&]{return std::filesystem::exists(fixture.root/"builder.models.json");},"offline model catalog task");
+    session.select("wb.tasks",widget(session.view(),"wb.tasks").state.records.back().id);session.activate("wb.task.show");
+    require(find(session.view(),"ai.model")&&widget(session.view(),"wb.sidebar").state.checked,
+            "Show AI task failed to reveal the hidden sidebar");
+#endif
+}
+
+void builder_typing_retains_native_control_identity() {
+    Temporary fixture;const auto project=fixture.root/"project",config=fixture.root/"config";
+    std::filesystem::create_directory(project);write(project/"chat.chat.md","# Builder input identity\n");
+    Workspace workspace(project);auto chat=workspace.open_chat("chat.chat.md");
+    for(const auto* id:{"task-a","task-b"}){BuilderTask task;task.id=id;task.label=id;task.status="completed";chat.state.builder.tasks.push_back(std::move(task));}
+    chat.state.builder.selected_task="task-a";workspace.save_state(chat);
+    Session session(project,"chat.chat.md",config);session.activate("selector.builder");session.reveal("builder.paths");
+    const auto paths=widget(session.view(),"builder.paths").spec.key,body=widget(session.view(),"builder.body").spec.key,
+        workspace_key=widget(session.view(),"builder.workspace").spec.key,run=widget(session.view(),"builder.run").spec.key;
+    require(session.adapter.focus(paths),"Cannot focus builder source paths");session.adapter.text_selection(paths,{0,session.text("builder.paths").size()});
+    std::string typed;
+    for(const char letter:std::string("source.txt")) {
+        typed+=letter;
+        require(session.adapter.replace(paths,std::string(1,letter))==gui::Delivery::delivered,"Builder rejected consecutive typing without refocus");
+        session.presented("builder consecutive typing");
+        require(widget(session.view(),"builder.paths").spec.key==paths&&widget(session.view(),"builder.body").spec.key==body&&
+                widget(session.view(),"builder.workspace").spec.key==workspace_key&&session.text("builder.paths")==typed&&
+                session.adapter.focused()==paths&&session.adapter.text_selection(paths)==gui::TextSelection{typed.size(),typed.size()},
+                "Builder typing replaced an input or ancestor, lost focus or failed to advance the caret");
+    }
+    session.autosave();
+    require(widget(session.view(),"builder.paths").spec.key==paths&&widget(session.view(),"builder.body").spec.key==body&&
+            widget(session.view(),"builder.workspace").spec.key==workspace_key&&session.adapter.focused()==paths&&
+            session.adapter.text_selection(paths)==gui::TextSelection{typed.size(),typed.size()},"Builder autosave replaced the focused setup controls");
+    const auto epoch=session.application->input_epoch(),revision=session.view().revision;
+    require(session.adapter.send(gui::WidgetEvent{paths,gui::EditText{"obsolete","."}})==gui::Delivery::ignored&&
+            session.adapter.send(gui::WidgetEvent{run,gui::Activate{}})==gui::Delivery::ignored&&
+            session.application->input_epoch()==epoch&&session.view().revision==revision&&session.text("builder.paths")==typed,
+            "Stable setup identity accepted an obsolete edit or stale Build action");
+    session.activate("builder.new");require(session.text("builder.paths")=="."&&widget(session.view(),"builder.paths").spec.key!=paths,
+            "New task reused the previous setup input identity");
+    require(session.adapter.send(gui::WidgetEvent{paths,gui::EditText{"stale setup","."}})==gui::Delivery::ignored&&session.text("builder.paths")==".",
+            "A queued edit from the previous setup replaced New task defaults");
+    session.activate("tab.builder.Tasks");
+    const auto tasks=widget(session.view(),"builder.tasks").spec.key,remove=widget(session.view(),"builder.task.remove").spec.key;
+    session.select("builder.tasks","task-b");
+    require(session.adapter.send(gui::WidgetEvent{tasks,gui::SelectRecord{"task-a"}})==gui::Delivery::ignored&&
+            session.adapter.send(gui::WidgetEvent{remove,gui::Activate{}})==gui::Delivery::ignored&&
+            widget(session.view(),"builder.tasks").state.selected=="task-b"&&widget(session.view(),"builder.tasks").state.records.size()==2,
+            "Task selection left a stale record event or Remove action valid");
+}
+
+void persistent_builder_workspace_and_interrupted_tasks() {
+#if defined(__linux__)
+    Temporary fixture;const auto project=fixture.root/"project",config=fixture.root/"config";
+    std::filesystem::create_directory(project);write(project/"chat.chat.md","# Persistent builder\n");write(project/"other.chat.md","# Other builder\n");write(project/"source.txt","Offline source.\n");
+    const auto worker=fixture.root/"persistent builder worker.py";
+    write(worker,R"PY(import json, os, pathlib, sys, time
+assert sys.flags.isolated and sys.flags.no_user_site
+with open(sys.argv[2], encoding='utf-8') as stream:
+    request=json.load(stream)
+assert request['operation'] in ('scribble','evaluate')
+assert request['prompt']=='' and 'history' not in request and 'pseudocode' not in request
+assert request['selector']['calculations'] is False
+base=pathlib.Path(__file__).parent
+with (base/'launches.jsonl').open('a',encoding='utf-8') as stream:
+    stream.write(json.dumps(request)+'\n')
+resume=request['scribble'].get('resume',False)
+if request['operation']=='scribble':
+    assert request['stream'] is True
+    print(json.dumps({'stream_version':1,'event':'start','sequence':0,'operation':'scribble'}),flush=True)
+    print(json.dumps({'stream_version':1,'event':'progress','sequence':1,'phase':'enriching','completed_chunks':1,'total_chunks':2,'resumed_chunks':1 if resume else 0}),flush=True)
+while not (base/'finish').exists():
+    time.sleep(.01)
+if request['operation']=='scribble':
+    output=pathlib.Path(request['output_dir'])
+    if not output.is_absolute():output=pathlib.Path(request['root'])/output
+    output.mkdir(exist_ok=True)
+    (output/'scribbles.md').write_text('# Generated offline Scribble\n',encoding='utf-8')
+    print(json.dumps({'stream_version':1,'event':'progress','sequence':2,'phase':'completed','completed_chunks':2,'total_chunks':2,'resumed_chunks':1 if resume else 0}),flush=True)
+    print(json.dumps({'stream_version':1,'event':'final','sequence':3,'result':{'ok':True,'text':'Retained build result.','sources':[]}}),flush=True)
+else:
+    print(json.dumps({'ok':True,'text':'Retained evaluation result.','sources':[]}))
+)PY");
+    const auto launches=[&]{std::vector<json::Value> values;if(std::filesystem::exists(fixture.root/"launches.jsonl")){std::istringstream stream(read(fixture.root/"launches.jsonl"));std::string line;while(std::getline(stream,line))if(!line.empty())values.push_back(json::parse(line));}return values;};
+    const auto saved=[&]{return Workspace(project).open_chat("chat.chat.md").state;};
+    {
+        Session session(project,"chat.chat.md",config,true,worker);session.adapter.send(gui::ResizeEvent{{900,640},1});session.edit("wb.composer","Keep my chat draft.");session.activate("selector.builder");
+        require(!session.view().modal_root&&find(session.view(),"builder.workspace")&&!find(session.view(),"wb.center")&&fully_visible(session.adapter.resolved_availability(widget(session.view(),"builder.exit").spec.key)),"Builder did not occupy the main workspace with a persistent Exit control");
+        session.edit("builder.output",(project/"retained-output").string());session.edit("builder.label","Retained task");session.escape();require(find(session.view(),"builder.paths")&&launches().empty(),"Escape exited setup or launched a task");
+        session.activate("builder.run");wait_for(session,[&]{return launches().size()==1&&session.text("builder.task.status").find("enriching")!=std::string::npos;},"held builder progress");
+        const auto first=widget(session.view(),"builder.tasks").state.records.front().id;const auto pause_key=widget(session.view(),"builder.task.pause").spec.key;
+        session.escape();session.activate("tab.builder.Results");session.escape();require(!session.view().modal_root&&find(session.view(),"builder.exit")&&session.text("builder.result.text").find("1 / 2")!=std::string::npos,"Escape closed builder/results or progress was lost");
+        session.activate("builder.exit");require(widget(session.view(),"wb.cancel").state.enabled&&session.text("wb.composer")=="Keep my chat draft.","Exit stopped the builder or changed the chat draft");
+        session.activate("selector.builder");require(find(session.view(),"builder.result.text"),"Reentry reset the selected builder tab");
+        session.activate("tab.builder.Setup");session.edit("builder.output","edited-after-launch");session.edit("builder.label","Edited later");session.choose("builder.ai","true");session.edit("builder.model","custom/later-model");
+        require(!widget(session.view(),"builder.run").state.enabled&&launches().size()==1,"Setup launched a concurrent task or enabled another launch");
+        session.activate("tab.builder.Tasks");session.activate("builder.task.pause");require(session.text("builder.task.status").find("paused")!=std::string::npos&&saved().builder.tasks.front().status=="paused","Explicit Pause did not retain/save the task");
+        require(session.adapter.send(gui::WidgetEvent{pause_key,gui::Activate{}})==gui::Delivery::ignored,"Old Pause control remained valid after task completion");
+        session.activate("builder.task.resume");wait_for(session,[&]{return launches().size()==2&&session.text("builder.task.status").find("enriching")!=std::string::npos;},"explicit Scribble resume");
+        const auto requests=launches();auto original_request=requests[0];original_request.object().erase("stream");require(requests[1].find("scribble")->find("resume")->boolean()&&requests[1].find("output_dir")->string()==(project/"retained-output").string()&&requests[1].find("settings")->find("model")->string().empty()&&saved().builder.tasks.front().request_json==json::stringify(original_request,64*1024),"Resume changed the saved request or used later setup edits");
+        session.activate("builder.exit");session.application.reset();require(saved().builder.tasks.front().status=="interrupted"&&saved().builder.selected_task==first,"Shutdown failed to persist interrupted worker ownership");
+    }
+    {
+        Session session(project,"chat.chat.md",config,true,worker);require(launches().size()==2&&session.text("wb.composer")=="Keep my chat draft.","Reopening auto-launched work or lost the chat draft");session.activate("selector.builder");require(widget(session.view(),"builder.task.resume").state.enabled&&session.text("builder.task.status").find("interrupted")!=std::string::npos,"Interrupted saved task lacked explicit Resume");
+        session.activate("builder.task.resume");wait_for(session,[&]{return launches().size()==3;},"restart resume launch");write(fixture.root/"finish","done\n");wait_for(session,[&]{return !widget(session.view(),"builder.task.pause").state.enabled;},"resumed build completion");session.success("resumed build completion");
+        require(saved().builder.tasks.front().status=="completed"&&saved().builder.tasks.front().completed_chunks==2&&saved().builder.tasks.front().resumed_chunks==1,"Saved resumed completion/progress was incorrect");
+        session.activate("builder.task.show");require(session.text("builder.result.text").find("Retained build result.")!=std::string::npos,"Show Results lost retained output");session.activate("builder.task.refs");require(saved().selector.refs==std::vector<PathToggle>{{(project/"retained-output").string(),true}},"Use as Ref did not enable the task's original output directory");
+        session.activate("builder.task.open");require(session.view().modal_root&&session.text("file.text")=="# Generated offline Scribble\n","Completed absolute output did not open in the ordinary file editor");session.escape();require(find(session.view(),"builder.exit")&&!session.view().modal_root,"Escape from nested file editor exited builder");
+        session.activate("tab.builder.Setup");require(session.text("builder.output")=="edited-after-launch"&&session.text("builder.model")=="custom/later-model","Restart discarded edited setup");session.choose("builder.ai","false");session.check("builder.evaluation",true);session.edit("builder.small_model","custom/evaluation-model");session.activate("builder.evaluate");wait_for(session,[&]{return !widget(session.view(),"builder.task.pause").state.enabled;},"retained evaluation completion");require(!widget(session.view(),"builder.task.resume").state.enabled&&widget(session.view(),"builder.task.retry").state.enabled,"Evaluation exposed checkpoint Resume or omitted explicit Retry");
+        session.activate("builder.task.retry");wait_for(session,[&]{return !widget(session.view(),"builder.task.pause").state.enabled;},"explicit evaluation retry");require(saved().builder.tasks.size()==3&&launches().size()==5,"Evaluation retry did not retain a new task");
+        session.activate("builder.exit");session.activate("tab.left.Chats");session.chat("other.chat.md");session.activate("selector.builder");require(session.text("builder.output")==".zzz_compendium/scribbles/project"&&launches().size()==5,"Another chat inherited builder setup or launched work");session.activate("builder.exit");session.chat("chat.chat.md");session.activate("selector.builder");require(widget(session.view(),"builder.tasks").state.records.size()==3,"Switching chats discarded retained builder tasks");
+        session.activate("builder.task.remove");require(saved().builder.tasks.size()==2&&std::filesystem::exists(project/"retained-output/scribbles.md"),"Remove record changed output files or failed to remove only the selected task");
+        require(read(project/"chat.chat.md")=="# Persistent builder\n","Builder work changed chat history");
+    }
+#endif
+}
+
+void builder_restart_ownership_ids_and_checked_launch() {
+#if defined(__linux__) || defined(_WIN32)
+    Temporary fixture;const auto project=fixture.root/"project",config=fixture.root/"config";
+    std::filesystem::create_directory(project);write(project/"chat.chat.md","# Saved tasks\n");
+    const auto worker=fixture.root/"checked builder worker.py";write(worker,R"PY(import json, pathlib, sys
+with open(sys.argv[2], encoding='utf-8') as stream:request=json.load(stream)
+(pathlib.Path(__file__).parent/'launched').write_text(json.dumps(request),encoding='utf-8')
+print(json.dumps({'ok':True,'text':'Saved task completed.','sources':[]}))
+)PY");
+    Workspace workspace(project);auto chat=workspace.open_chat("chat.chat.md");
+    chat.state.builder.active=true;chat.state.builder.tab="Tasks";chat.state.builder.selected_task="builder-1";chat.state.builder.next_task_id=1;
+    chat.state.builder.fields={{"builder.paths","."},{"builder.kind","scribbles"},{"builder.output","fresh-output"},{"builder.default_output","fresh-output"},{"builder.label","Saved task"},{"builder.ai","false"},{"builder.web","false"},{"builder.evaluation","false"},{"builder.kimi_ceiling","false"},{"builder.max_calls","32"},{"builder.model",""},{"builder.model_choice",""},{"builder.small_model",""},{"builder.questions","A question"}};
+    BuilderTask task;task.id="builder-1";task.status="running";task.label="Saved running";task.request_json=json::stringify(json::Value::Object{{"operation","scribble"},{"root",project.string()},{"chat_path","chat.chat.md"},{"scribble",json::Value::Object{{"ai_enabled",false}}}});chat.state.builder.tasks.push_back(task);workspace.save_state(chat);
+    {
+        Session session(project,"chat.chat.md",config,true,worker);require(session.text("builder.task.status").find("interrupted")!=std::string::npos&&!std::filesystem::exists(fixture.root/"launched"),"Loaded running task stayed running or launched automatically");session.escape();session.activate("tab.builder.Setup");session.activate("builder.run");wait_for(session,[&]{return !widget(session.view(),"builder.task.pause").state.enabled;},"collision-free saved task ID");
+        const auto saved=Workspace(project).open_chat("chat.chat.md").state.builder;require(saved.tasks.size()==2&&saved.tasks[0].id=="builder-1"&&saved.tasks[1].id=="builder-2"&&saved.next_task_id==3,"Stale ID counter produced duplicate task IDs");
+    }
+    chat=workspace.open_chat("chat.chat.md");chat.state.builder.tab="Tasks";chat.state.builder.selected_task="builder-1";chat.state.builder.tasks[0].request_json=json::stringify(json::Value::Object{{"operation","scribble"},{"root",project.string()},{"chat_path","another.chat.md"},{"scribble",json::Value::Object{{"ai_enabled",false}}}});workspace.save_state(chat);const auto previous_launch=read(fixture.root/"launched");
+    {
+        Session session(project,"chat.chat.md",config,true,worker);
+#if defined(_WIN32)
+        require(!widget(session.view(),"builder.task.resume").state.enabled&&widget(session.view(),"builder.task.resume").state.help.find("Windows")!=std::string::npos,"Windows offered unsupported durable Resume");
+#else
+        session.activate("builder.task.resume");session.error("another root or chat");require(read(fixture.root/"launched")==previous_launch,"Moved/copied task launched against another checkpoint owner");
+#endif
+    }
+    chat=workspace.open_chat("chat.chat.md");chat.state.builder.tab="Setup";chat.state.builder.next_task_id=9007199254740991ULL;task.id="builder-9007199254740991";task.status="completed";task.request_json="{}";chat.state.builder.tasks.push_back(task);workspace.save_state(chat);
+    {
+        Session session(project,"chat.chat.md",config,true,worker);session.activate("builder.run");session.error("ID limit");require(read(fixture.root/"launched")==previous_launch&&Workspace(project).open_chat("chat.chat.md").state.builder.tasks.size()==3,"ID exhaustion launched work or corrupted task records");
+    }
+    // A changed state sidecar must block launch before the trusted worker runs.
+    std::filesystem::remove(fixture.root/"launched");write(project/"conflict.chat.md","# Conflicting task\n");
+    {
+        Session session(project,"conflict.chat.md",config,true,worker);session.edit("wb.composer","Preserve conflict draft.");session.activate("selector.builder");const auto path=project/Workspace::state_path("conflict.chat.md");const auto foreign=read(path)+"\n";write(path,foreign);session.edit("builder.output","conflicting-output");session.activate("builder.run");session.error("changed");
+        require(!std::filesystem::exists(fixture.root/"launched")&&!widget(session.view(),"builder.task.pause").state.enabled&&session.text("builder.task.status").find("ready")!=std::string::npos&&read(path)==foreign,"Failed prelaunch save started a worker, forged running status or overwrote foreign state");
+    }
+#endif
+}
+
+void builder_metadata_and_edit_limits_do_not_poison_saves() {
+#if defined(__linux__) || defined(_WIN32)
+    Temporary fixture;const auto project=fixture.root/"project",config=fixture.root/"config";std::filesystem::create_directory(project);write(project/"chat.chat.md","# Safe metadata\n");
+    const auto worker=fixture.root/"metadata builder worker.py";write(worker,R"PY(import json, sys
+with open(sys.argv[2], encoding='utf-8') as stream:request=json.load(stream)
+output=request['output_dir']
+result={'ok':True,'text':'Safe retained result.'}
+if output=='wrong-type':result['usage']=[]
+elif output=='forbidden-key':result['usage']={'authorization':'synthetic-private-fixture'}
+elif output=='large-result':result['text']='bounded result '*20000
+elif output=='nul-text':result['text']='safe prefix\0unsafe suffix'
+elif output=='nul-error':result={'ok':False,'error':'synthetic error\0suffix'}
+print(json.dumps(result))
+)PY");
+    Session session(project,"chat.chat.md",config,true,worker);session.activate("selector.builder");
+    require(widget(session.view(),"builder.paths").spec.text_policy.max_bytes==64*1024&&widget(session.view(),"builder.label").spec.text_policy.max_bytes==256,"Builder inputs exceed durable setup/request limits");
+    const auto previous=session.text("builder.paths");const auto key=widget(session.view(),"builder.paths").spec.key;require(session.adapter.send(gui::WidgetEvent{key,gui::EditText{std::string(64*1024+1,'x'),previous}})==gui::Delivery::ignored&&session.text("builder.paths")==previous,"Oversized multiline paste poisoned builder setup");
+    std::string too_many_paths;for(int i=0;i<129;++i)too_many_paths+="source-"+std::to_string(i)+"\n";session.edit("builder.paths",too_many_paths);session.activate("builder.run");session.error("entry limit");require(Workspace(project).open_chat("chat.chat.md").state.builder.tasks.empty()&&find(session.view(),"builder.paths"),"Invalid path count retained an unsaveable immutable task");session.edit("builder.paths",".");
+    for(const auto* output:{"wrong-type","forbidden-key","large-result","nul-text","nul-error"}){session.edit("builder.output",output);session.activate("builder.run");wait_for(session,[&]{return !widget(session.view(),"builder.task.pause").state.enabled;},"bounded safe builder metadata");const bool nul=std::string_view(output).starts_with("nul-");if(nul)session.error("invalid JSON response");else session.success("safe result metadata");const auto state=Workspace(project).open_chat("chat.chat.md").state;const auto& task=state.builder.tasks.back();const auto result=json::parse(task.result_json);require((nul?task.status=="failed"&&task.error.find('\0')==std::string::npos:task.status=="completed"&&result.find("omitted")&&result.find("omitted")->boolean())&&task.result_json.find("synthetic-private-fixture")==std::string::npos,"Malformed/forbidden/large metadata poisoned or leaked into the saved result");session.activate("builder.exit");session.edit("wb.composer",std::string("Still save after ")+output);session.autosave();session.success("composer save after omitted builder metadata");require(Workspace(project).open_chat("chat.chat.md").state.draft==std::string("Still save after ")+output,"Result metadata blocked later chat saves");session.activate("selector.builder");session.activate("tab.builder.Setup");}
+#endif
+}
+
+void builder_live_edits_preserve_completion_capacity() {
+#if defined(__linux__) || defined(_WIN32)
+    Temporary fixture;const auto project=fixture.root/"project",config=fixture.root/"config";std::filesystem::create_directory(project);write(project/"chat.chat.md","# Live setup capacity\n");
+    Workspace workspace(project);auto chat=workspace.open_chat("chat.chat.md");chat.state.builder.active=true;chat.state.builder.fields={{"builder.paths","."},{"builder.kind","scribbles"},{"builder.output","live-output"},{"builder.default_output","live-output"},{"builder.label","Live setup"},{"builder.ai","false"},{"builder.web","false"},{"builder.evaluation","true"},{"builder.kimi_ceiling","false"},{"builder.max_calls","32"},{"builder.model",""},{"builder.model_choice",""},{"builder.small_model","custom/model"},{"builder.questions","Original question"}};
+    json::Value::Array paths;for(int i=0;i<14;++i)paths.emplace_back(std::string(3450,'p'));const auto snapshot=json::stringify(json::Value::Object{{"operation","scribble"},{"root",project.string()},{"chat_path","chat.chat.md"},{"input_paths",paths}});
+    for(int i=1;i<=14;++i){BuilderTask task;task.id="retained-"+std::to_string(i);task.status="completed";task.request_json=snapshot;chat.state.builder.tasks.push_back(task);}workspace.save_state(chat);
+    const auto worker=fixture.root/"held capacity worker.py";write(worker,R"PY(import json, pathlib, sys, time
+with open(sys.argv[2], encoding='utf-8') as stream:request=json.load(stream)
+base=pathlib.Path(__file__).parent
+(base/'launched').write_text('started',encoding='utf-8')
+while not (base/'finish').exists():time.sleep(.01)
+print(json.dumps({'ok':True,'text':'Completion still fits.','sources':[]}))
+)PY");
+    Session session(project,"chat.chat.md",config,true,worker);session.activate("builder.run");wait_for(session,[&]{return std::filesystem::exists(fixture.root/"launched");},"held aggregate capacity task");session.activate("tab.builder.Setup");session.edit("builder.paths",std::string(64*1024,'"'));session.edit("builder.questions",std::string(64*1024,'"'));session.error("reserved space");require(session.text("builder.questions")=="Original question","Rejected aggregate edit discarded previously valid setup");write(fixture.root/"finish","done\n");session.activate("tab.builder.Tasks");wait_for(session,[&]{return !widget(session.view(),"builder.task.pause").state.enabled;},"completion after bounded live edit");session.success("completion after bounded live edit");require(Workspace(project).open_chat("chat.chat.md").state.builder.tasks.back().status=="completed","Live setup exhausted completion capacity and blocked persistence");
+#endif
+}
+
 void bounded_settings_and_builder() {
     Temporary fixture;
     write(fixture.root / "chat.chat.md", "# Settings fixture\n");
@@ -3632,40 +4116,46 @@ void bounded_settings_and_builder() {
     session.select("wb.files", "source.txt");
     session.activate("wb.file.actions");
     session.activate("wb.file.scribble");
-    session.success("open local builder dialog");
-    require(session.text("builder.max_calls") == "32" &&
-            !widget(session.view(), "builder.model").state.selected &&
-            session.text("builder.small_model").empty() && !find(session.view(), "builder.kimi_ceiling"),
-            "Builder selected a model implicitly or omitted its normal bounded call setting");
+    session.success("open local builder workspace");
+    require(widget(session.view(), "builder.ai").state.selected == "false" &&
+            !find(session.view(), "builder.model") && !find(session.view(), "builder.small_model") &&
+            !find(session.view(), "builder.kimi_ceiling"),
+            "Builder selected AI implicitly or showed irrelevant local-mode model controls");
+    session.choose("builder.ai", "true");
+    session.check("builder.evaluation", true);
+    require(session.text("builder.max_calls") == "32" && session.text("builder.model").empty() &&
+            session.text("builder.small_model").empty() && !find(session.view(), "builder.model_choice"),
+            "Builder selected a model implicitly, showed hidden Tutorial examples or omitted its call setting");
     const auto unchanged = inventory(fixture.root);
     session.activate("builder.run");
     session.error("model");
-    require(session.view().modal_root && !widget(session.view(), "builder.model").state.selected &&
+    require(!session.view().modal_root && find(session.view(),"builder.exit") && session.text("builder.model").empty() &&
             session.text("builder.small_model").empty() && inventory(fixture.root) == unchanged,
             "Builder missing-model preflight closed the dialog or started a task");
-    session.choose("builder.model", "nvidia/nemotron-3-ultra-550b-a55b");
+    session.edit("builder.model", "nvidia/nemotron-3-ultra-550b-a55b");
     for (const auto* invalid : {"0", "4097"}) {
         session.edit("builder.max_calls", invalid);
         session.activate("builder.run");
         session.error("between 1 and 4096");
-        require(session.view().modal_root && session.text("builder.max_calls") == invalid,
+        require(!session.view().modal_root && find(session.view(),"builder.exit") && session.text("builder.max_calls") == invalid,
                 "Invalid builder calls started a task or discarded the dialog input");
     }
     session.edit("builder.max_calls", "32");
-    session.choose("builder.model", "moonshotai/kimi-k3");
+    session.edit("builder.model", "moonshotai/kimi-k3");
     require(widget(session.view(), "builder.kimi_ceiling").state.selected == "false",
             "Kimi builder did not require an explicit higher price ceiling");
     session.activate("builder.run");
     session.error("explicit higher price ceiling");
-    require(session.view().modal_root &&
+    require(!session.view().modal_root && find(session.view(),"builder.exit") &&
             widget(session.view(), "builder.kimi_ceiling").state.selected == "false",
             "Kimi validation started a task or enabled the ceiling implicitly");
-    session.activate("modal.cancel");
+    session.activate("builder.exit");
     session.application->tick();
     session.presented("builder validation checkpoint");
     session.activate("tab.left.Running Tasks");
-    require(widget(session.view(), "wb.tasks").state.records.empty() && inventory(fixture.root) == unchanged,
-            "Rejected builder settings launched a job or wrote project files");
+    require(widget(session.view(), "wb.tasks").state.records.empty() && saved.open_chat("chat.chat.md").state.builder.tasks.empty() &&
+            read(fixture.root/"chat.chat.md")=="# Settings fixture\n" && read(fixture.root/"source.txt")=="Local builder input.\n",
+            "Rejected builder settings launched a job or changed source/chat files");
 }
 
 void non_utf8_file_names() {
@@ -3914,6 +4404,15 @@ int main(int argc, char** argv) {
         terminal_drafts_without_shells();
         pseudocode_without_final_newline();
         transcription_validation(captures);
+        sidebar_visibility_retains_controls_and_is_global();
+        hidden_sidebar_reveals_ai_and_preserves_preference_conflicts();
+        code_is_an_explicit_chat_option();
+        builder_discovery_and_modes_are_explicit();
+        builder_typing_retains_native_control_identity();
+        persistent_builder_workspace_and_interrupted_tasks();
+        builder_restart_ownership_ids_and_checked_launch();
+        builder_metadata_and_edit_limits_do_not_poison_saves();
+        builder_live_edits_preserve_completion_capacity();
         bounded_settings_and_builder();
         non_utf8_file_names();
         file_buffers(captures);

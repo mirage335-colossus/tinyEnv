@@ -51,6 +51,22 @@ JobStatus partial_until(Job& job, std::string_view expected) {
     (void)job.cancel();
     throw std::runtime_error("Local streaming preview timed out");
 }
+JobStatus progress_until(Job& job, std::size_t expected) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (std::chrono::steady_clock::now() < deadline) {
+        const auto status = job.poll();
+        if (status.progress_phase == "enriching" && status.completed_chunks == expected) {
+            check(status.state == ServiceState::running && !status.response && status.partial_text.empty() &&
+                  status.stream_revision == 0 && status.progress_revision > 0,
+                  "Scribble progress became an assistant preview or arrived only after completion");
+            return status;
+        }
+        if (status.finished()) throw std::runtime_error("Local Scribble finished before its expected progress");
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    (void)job.cancel();
+    throw std::runtime_error("Local Scribble progress timed out");
+}
 void local_command(const std::vector<std::string>& args, const std::filesystem::path& cwd) {
     foundation::editor::ProcessRunner process;
     process.start(args, cwd);
@@ -103,7 +119,42 @@ assert sys.argv[1] == '--request'
 with open(sys.argv[2], encoding='utf-8') as stream:
     request = json.load(stream)
 operation = request['operation']
-if operation in ('chat', 'agent'):
+if operation == 'scribble':
+    fixture = request.get('fixture', 'complete')
+    def frame(event, sequence, **fields):
+        print(json.dumps(dict(stream_version=1, event=event, sequence=sequence, **fields)), flush=True)
+    if fixture == 'legacy':
+        print(json.dumps({'ok': True, 'text': 'Built legacy artifacts.'}), flush=True)
+        sys.exit(0)
+    frame('start', 0, operation='scribble')
+    frame('progress', 1, phase='enriching', completed_chunks=1, total_chunks=2, resumed_chunks=1)
+    if fixture == 'complete':
+        time.sleep(0.2)
+        frame('progress', 2, phase='completed', completed_chunks=2, total_chunks=2, resumed_chunks=1)
+        frame('final', 3, result={'ok': True, 'text': 'Built selected knowledge.'})
+    elif fixture == 'hold':
+        time.sleep(60)
+    elif fixture == 'delta':
+        frame('delta', 2, text='sensitive annotation', replace=False)
+        time.sleep(60)
+    elif fixture in ('frame-limit', 'too-many-frames'):
+        maximum = 4096 if fixture == 'frame-limit' else 4097
+        for sequence in range(2, maximum + 1):
+            frame('progress', sequence, phase='enriching', completed_chunks=1, total_chunks=2, resumed_chunks=1)
+        frame('final', maximum + 1, result={'ok': True, 'text': 'Built selected knowledge.'})
+    else:
+        progress = dict(phase='enriching', completed_chunks=1, total_chunks=2, resumed_chunks=1)
+        if fixture == 'fractional': progress['completed_chunks'] = 1.5
+        elif fixture == 'negative': progress['completed_chunks'] = -1
+        elif fixture == 'boolean': progress['completed_chunks'] = True
+        elif fixture == 'over-total': progress['completed_chunks'] = 3
+        elif fixture == 'over-bound': progress['total_chunks'] = 4097
+        elif fixture == 'bad-resumed': progress['resumed_chunks'] = 2
+        elif fixture == 'bad-phase': progress['phase'] = 'sensitive provider text'
+        elif fixture == 'unknown-field': progress['text'] = 'sensitive annotation'
+        frame('progress', 2, **progress)
+        time.sleep(60)
+elif operation in ('chat', 'agent'):
     fixture = request.get('fixture', 'complete')
     def frame(event, sequence, **fields):
         value = dict(stream_version=1, event=event, sequence=sequence, **fields)
@@ -415,6 +466,48 @@ else:
         streamed.object()["stream"] = true;
         streamed.object()["operation"] = "evaluate";
         throws([&] { job.start(streamed, root); }, "An unsupported operation enabled native streaming");
+        streamed.object()["operation"] = "scribble";
+        streamed.object()["fixture"] = "complete";
+        job.start(streamed, root);
+        const auto scribble_progress = progress_until(job, 1);
+        check(scribble_progress.total_chunks == 2 && scribble_progress.resumed_chunks == 1,
+              "Scribble progress lost its bounded total or resumed count");
+        status = finish(job);
+        check(status.state == ServiceState::succeeded && status.streaming && status.response &&
+              status.progress_phase == "completed" && status.completed_chunks == 2 && status.total_chunks == 2 &&
+              status.resumed_chunks == 1 && status.progress_revision > scribble_progress.progress_revision &&
+              status.partial_text.empty() && status.stream_revision == 0 &&
+              status.response->find("text")->string() == "Built selected knowledge.",
+              "Scribble completion became an assistant reply or lost independent progress");
+        streamed.object()["fixture"] = "hold";
+        job.start(streamed, root);
+        (void)progress_until(job, 1);
+        status = job.cancel();
+        check(status.state == ServiceState::cancelled && status.completed_chunks == 1 && status.resumed_chunks == 1 &&
+              status.partial_text.empty() && !job.running() && std::filesystem::is_empty(root / ".tinyenv"),
+              "Paused Scribble lost its validated progress or retained its worker");
+        for (const auto* fixture : {"delta", "fractional", "negative", "boolean", "over-total", "over-bound",
+                                   "bad-resumed", "bad-phase", "unknown-field"}) {
+            streamed.object()["fixture"] = fixture;
+            job.start(streamed, root); status = finish(job);
+            check(status.state == ServiceState::failed && !status.response && status.completed_chunks == 1 &&
+                  status.progress_phase == "enriching" && status.partial_text.empty() &&
+                  status.error.find("sensitive") == std::string::npos && std::filesystem::is_empty(root / ".tinyenv"),
+                  "Malformed Scribble progress escaped bounds, replaced validated counts or leaked annotations");
+        }
+        streamed.object()["fixture"] = "legacy";
+        job.start(streamed, root); status = finish(job);
+        check(status.state == ServiceState::succeeded && !status.streaming && status.response &&
+              status.progress_phase.empty() && status.progress_revision == 0 && status.partial_text.empty(),
+              "A legacy Scribble worker lost compatibility or inherited preceding progress");
+        streamed.object()["fixture"] = "frame-limit";
+        many_frames.start(streamed, root); status = finish(many_frames);
+        check(status.state == ServiceState::succeeded && status.completed_chunks == 1,
+              "The supported Scribble progress frame count was rejected");
+        streamed.object()["fixture"] = "too-many-frames";
+        many_frames.start(streamed, root); status = finish(many_frames);
+        check(status.state == ServiceState::failed && !status.response && status.completed_chunks == 1 &&
+              std::filesystem::is_empty(root / ".tinyenv"), "Unbounded Scribble progress frames were accepted");
 #if defined(__linux__)
         const auto outside_scratch = root / "outside scratch";
         std::filesystem::create_directory(outside_scratch);

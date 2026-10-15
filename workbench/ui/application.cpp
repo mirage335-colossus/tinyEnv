@@ -263,7 +263,8 @@ struct Application::Impl {
         std::map<std::string,TranscriptScroll> split_scroll;
         FlowGraph cached_graph;std::uint64_t graph_revision{};
         Job job;JobStatus job_status;GitStatusJob git;GitStatus git_status;
-        std::string operation,source_report,terminal_command,selected_snippet,selector_kind="scribbles";
+        std::string operation,source_report,terminal_command,selected_snippet,selector_kind="scribbles",builder_job_id;
+        std::uint64_t builder_action_revision{},builder_setup_revision{};
         struct DraftEdit {std::string draft,source;gui::TextSelection composer_selection,flow_selection;std::vector<ImageAttachment> images;};
         struct ChatEdit {std::string text;gui::TextSelection selection;};
         std::vector<DraftEdit> undo_draft,redo_draft;std::vector<ChatEdit> undo_chat,redo_chat;
@@ -275,7 +276,7 @@ struct Application::Impl {
         bool stream_owned{},stream_conflict{},reply_remembered{};
         std::size_t displayed_stream_revision{};
         std::chrono::steady_clock::time_point last_stream_display{},last_stream_save{};
-        explicit Session(Chat document,std::filesystem::path credential_directory):chat(std::move(document)),flow(pseudocode_fence(chat.state.draft)?pseudocode_fence(chat.state.draft)->text:std::string{}),job(8*1024*1024,launch_runtime_path,{},std::move(credential_directory)){chat.state.pseudocode=flow.text();source_report=chat.state.sources_json=="[]"?std::string{}:chat.state.sources_json;}
+        explicit Session(Chat document,std::filesystem::path credential_directory):chat(std::move(document)),flow(pseudocode_fence(chat.state.draft)?pseudocode_fence(chat.state.draft)->text:std::string{}),job(8*1024*1024,launch_runtime_path,{},std::move(credential_directory)){chat.state.pseudocode=flow.text();source_report=chat.state.sources_json=="[]"?std::string{}:chat.state.sources_json;for(auto& task:chat.state.builder.tasks)if(task.status=="running"){task.status="interrupted";save_due=true;changed_at=std::chrono::steady_clock::now();}}
         const FlowGraph& graph() {if(graph_revision!=flow.revision()){cached_graph=flow.graph();graph_revision=flow.revision();}return cached_graph;}
     };
     std::map<std::string,std::unique_ptr<Session>> sessions;std::string current;
@@ -305,6 +306,11 @@ struct Application::Impl {
     bool error{},pending{},stopped{};
     std::uint64_t epoch=1,revision=1,widget_generation{},flow_input_revision{};
     std::map<std::string,gui::TextSelection> restored_selection;
+    bool right_sidebar_visible=true,restore_sidebar=false;
+    std::map<std::string,gui::Point> sidebar_scroll;
+    std::map<std::string,gui::TextSelection> sidebar_selection;
+    std::string sidebar_owner;
+    std::string sidebar_preference_error;
     struct Life {gui::WidgetSpec spec;bool active{};std::uint64_t scene{},semantic{},source_revision{};};std::map<std::string,Life> lives;
     struct CommandLife {gui::Command command;bool active{};std::uint64_t scene{},semantic{};};std::map<std::string,CommandLife> command_lives;
     std::uint64_t file_edit_revision{};
@@ -316,7 +322,7 @@ struct Application::Impl {
     explicit Impl(gui::Adapter& a):adapter(a),guardrail_job(8*1024*1024,launch_runtime_path) {
         view.client_size={1440,860};view.title="tinyEnv AI Workbench";view.palette=theme::dark_palette();view.widgets.reserve(128);
         std::string preferences_error;
-        try {preferences=std::make_unique<AiPreferences>(launch_config_directory);preferences->inherit(empty_state);}
+        try {preferences=std::make_unique<AiPreferences>(launch_config_directory);preferences->inherit(empty_state);right_sidebar_visible=preferences->right_sidebar_visible();}
         catch(const std::exception& e){preferences_error="AI defaults could not be loaded: "+std::string(e.what());}
         if(preferences)try {credentials=std::make_unique<AiCredentials>(preferences->directory());}
         catch(const std::exception& e){key_status_error=e.what();}
@@ -424,7 +430,7 @@ struct Application::Impl {
         presented_chat=current;presented_split.clear();if(auto* s=session()){restore_transcript(s->main_scroll,"wb.chat.rendered");if(s->chat.state.split_chat){presented_split=fields["wb.split.path"];restore_transcript(s->split_scroll[presented_split],"wb.split.rendered");}}
     }
     bool transcript_visible(const Session& s) {
-        if(!session()||state().center_tab!="Chat Markdown")return false;
+        if(!session()||state().builder.active||state().center_tab!="Chat Markdown")return false;
         return &s==session()||(state().split_chat&&fields["wb.split.path"]==s.chat.path.generic_string());
     }
     bool dirty_visible(const Session& s) {return &s==session()||state().left_tab=="Chats";}
@@ -434,6 +440,27 @@ struct Application::Impl {
     std::filesystem::path credential_directory() const {return preferences&&AiCredentials::storage_available()?preferences->directory():std::filesystem::path{};}
     void failure(std::string text){status=std::move(text);error=true;}
     void success(std::string text){status=std::move(text);error=false;}
+    void set_sidebar_visible(bool visible,bool reveal=false) {
+        if(visible==right_sidebar_visible)return;
+        if(!visible) {
+            sidebar_scroll.clear();sidebar_selection.clear();sidebar_owner=current;
+            for(const auto& widget:view.widgets)if(widget.spec.key.id=="wb.right"||widget.spec.parent=="wb.right") {
+                if(widget.spec.kind==gui::Kind::group||widget.spec.kind==gui::Kind::list||widget.spec.kind==gui::Kind::text)sidebar_scroll[widget.spec.key.id]=adapter.scroll_offset(widget.spec.key);
+                if(widget.spec.kind==gui::Kind::text)sidebar_selection[widget.spec.key.id]=adapter.text_selection(widget.spec.key);
+            }
+        }
+        if(reveal)right_sidebar_visible=true;
+        try {if(preferences)preferences->set_right_sidebar_visible(visible);else if(!reveal)throw std::runtime_error("Sidebar preferences are unavailable.");sidebar_preference_error.clear();}
+        catch(const std::exception& e){if(!reveal)throw;sidebar_preference_error="Sidebar shown; could not remember its visibility: "+std::string(e.what());}
+        right_sidebar_visible=visible;restore_sidebar=visible;
+    }
+    void show_ai() {
+        set_sidebar_visible(true,true);
+        if(state().right_tab!="AI"){state().right_tab="AI";if(auto* s=session())modified(*s);}
+        // AI can be taller than the pane. Start at its repair controls rather
+        // than restoring another tab's off-screen position.
+        sidebar_scroll.clear();sidebar_scroll["wb.right"]={};if(sidebar_owner!=current)sidebar_selection.clear();sidebar_owner=current;restore_sidebar=true;
+    }
     void cancel_flow_drag(std::uint64_t owner=0) {
         const bool cancelled=owner?graph.cancel_drag(owner):graph.dragging();
         if(!owner)graph.cancel_drag();
@@ -467,6 +494,8 @@ struct Application::Impl {
         fields["wb.chat.text"]=s->chat.text;fields["wb.composer"]=s->chat.state.draft;fields["wb.flow.text"]=s->flow.text();
         fields["wb.terminal.command"]=s->terminal_command;
         selector_kind=s->selector_kind;
+        for(auto it=fields.begin();it!=fields.end();)if(it->first.starts_with("builder."))it=fields.erase(it);else ++it;
+        for(const auto& [key,value]:s->chat.state.builder.fields)fields[key]=value;
         reset_node_fields();
     }
     void refresh_key_status() {
@@ -792,9 +821,10 @@ struct Application::Impl {
     json::Value request(std::string operation,const std::string& prompt,const std::string& history,const AiSettings& ai) {
         auto* s=session();if(!s)throw std::runtime_error("Create or open a chat first.");
         const auto& selector=s->chat.state.selector;
+        const bool calculations=(operation=="chat"||operation=="agent")&&selector.calculations;
         json::Value::Object out{{"schema_version",1},{"operation",std::move(operation)},{"root",workspace->root().string()},
             {"chat_path",s->chat.path.generic_string()},{"prompt",prompt},{"settings",settings_json(ai)},
-            {"selector",json::Value::Object{{"deep_research",selector.deep_research||ai.web_search},{"scribbles",toggles_json(selector.scribbles)},{"refs",toggles_json(selector.refs)},{"tools",toggles_json(selector.tools)}}},
+            {"selector",json::Value::Object{{"deep_research",selector.deep_research||ai.web_search},{"calculations",calculations},{"scribbles",toggles_json(selector.scribbles)},{"refs",toggles_json(selector.refs)},{"tools",toggles_json(selector.tools)}}},
             {"pseudocode",std::string{}}};
         if(out.at("operation").string()=="agent")out["pseudocode"]=submitted_pseudocode(prompt);
         const auto context_bytes=static_cast<std::size_t>(selector.context_max_kib)*1024;out["context_limits"]=json::Value::Object{{"max_total_bytes",context_bytes},{"max_file_bytes",std::min(context_bytes,std::size_t(4*1024*1024))},{"max_files",128}};
@@ -817,7 +847,7 @@ struct Application::Impl {
         if(prompt.size()>64*1024)throw std::runtime_error("Keep the current message within 64 KiB before sending.");
         AiSettings ai;
         try {ai=edited_ai_settings();validate_submission_model(ai);}
-        catch(...){if(s->chat.state.right_tab!="AI"){s->chat.state.right_tab="AI";modified(*s);}throw;}
+        catch(...){show_ai();throw;}
         if(agentic){const auto source=submitted_pseudocode(prompt);PseudocodeDocument submitted(source);if(!submitted.parsed())throw std::runtime_error("Repair the pseudocode syntax in the current message before running agents.");}
         const auto history=retry?submission_history(s->chat):s->chat.text;const auto submission=retry?s->chat.state.submission:std::optional<SubmittedMessage>{make_submission(prompt,agentic,history,images)};
         auto input=request(agentic?"agent":"chat",prompt,history,ai);input.object()["stream"]=true;if(!images.empty())input.object()["images"]=workspace->image_payloads(images);
@@ -853,7 +883,62 @@ struct Application::Impl {
         if(s.chat.path.generic_string()==current&&(!s.stream_owned||s.job_status.finished()))fields["wb.chat.text"]=s.chat.text;
         return true;
     }
+    BuilderTask* builder_task(Session& s,const std::string& id) {
+        const auto found=std::find_if(s.chat.state.builder.tasks.begin(),s.chat.state.builder.tasks.end(),[&](const auto& task){return task.id==id;});
+        return found==s.chat.state.builder.tasks.end()?nullptr:&*found;
+    }
+    BuilderTask& builder_task_candidate(BuilderState& builder,const std::string& id) {
+        const auto found=std::find_if(builder.tasks.begin(),builder.tasks.end(),[&](const auto& task){return task.id==id;});if(found==builder.tasks.end())throw std::runtime_error("Builder task record disappeared.");return *found;
+    }
+    BuilderTask* selected_builder_task() {auto* s=session();return s?builder_task(*s,s->chat.state.builder.selected_task):nullptr;}
+    std::size_t builder_size(const BuilderState& builder) {
+        json::Value::Object saved;for(const auto& [key,value]:builder.fields)saved[key]=value;json::Value::Array tasks;
+        for(const auto& task:builder.tasks)tasks.emplace_back(json::Value::Object{{"id",task.id},{"operation",task.operation},{"status",task.status},{"label",task.label},{"request_json",task.request_json},{"result_json",task.result_json},{"error",task.error},{"phase",task.phase},{"completed_chunks",task.completed_chunks},{"total_chunks",task.total_chunks},{"resumed_chunks",task.resumed_chunks}});
+        return json::stringify(json::Value::Object{{"active",builder.active},{"tab",builder.tab},{"selected_task",builder.selected_task},{"fields",std::move(saved)},{"tasks",std::move(tasks)},{"next_task_id",static_cast<std::size_t>(builder.next_task_id)}},8*1024*1024).size();
+    }
+    void compact_builder_results(BuilderState& builder,std::size_t maximum=1024*1024) {
+        for(auto& task:builder.tasks){if(builder_size(builder)<=maximum)return;if(task.result_json=="{}")continue;const auto old=json::parse(task.result_json);auto text=string_field(old,"text");text.resize(std::min(text.size(),std::size_t(1024)));while(!text.empty()&&!foundation::editor::ProjectFiles::valid_utf8(text))text.pop_back();task.result_json=json::stringify(json::Value::Object{{"text",std::move(text)},{"omitted",true}});}
+        for(auto& task:builder.tasks){if(builder_size(builder)<=maximum)return;if(task.result_json!="{}")task.result_json="{\"omitted\":true}";}
+    }
+    void retain_builder_fields() {
+        if(auto* s=session()){
+            auto candidate=s->chat.state.builder;for(const auto& [key,value]:fields)if(key.starts_with("builder.")&&!key.starts_with("builder.result"))candidate.fields[key]=value;
+            try{validate_builder_state(candidate);if(builder_size(candidate)>896*1024)throw std::runtime_error("Setup metadata exceeds the reserved space for builder tasks. Shorten the input or remove an older task record.");}catch(...){for(auto it=fields.begin();it!=fields.end();)if(it->first.starts_with("builder.")&&!it->first.starts_with("builder.result"))it=fields.erase(it);else ++it;for(const auto& [key,value]:s->chat.state.builder.fields)fields[key]=value;throw;}
+            s->chat.state.builder.fields=std::move(candidate.fields);modified(*s);
+        }
+    }
+    void builder_progress(Session& s) {
+        if(s.job_status.progress_revision)if(auto* task=builder_task(s,s.builder_job_id)){task->phase=s.job_status.progress_phase;task->completed_chunks=s.job_status.completed_chunks;task->total_chunks=s.job_status.total_chunks;task->resumed_chunks=s.job_status.resumed_chunks;modified(s);}
+    }
+    std::string builder_error(std::string text) {
+        text=presentation_text(text,true);text.resize(std::min(text.size(),std::size_t(4096)));while(!text.empty()&&!foundation::editor::ProjectFiles::valid_utf8(text))text.pop_back();return text;
+    }
+    std::string bounded_builder_result(const JobStatus& job,bool omitted) {
+        auto text=job.response?presentation_text(string_field(*job.response,"text"),true):std::string{};text.resize(std::min(text.size(),std::size_t(48*1024)));
+        const auto trim_utf8=[&]{while(!text.empty()&&!foundation::editor::ProjectFiles::valid_utf8(text))text.pop_back();};trim_utf8();
+        for(;;){const auto encoded=json::stringify(json::Value::Object{{"ok",job.state==ServiceState::succeeded},{"text",text},{"omitted",omitted}});if(encoded.size()<=128*1024)return encoded;text.resize(text.size()/2);trim_utf8();}
+    }
+    void finish_builder(Session& s) {
+        auto* task=builder_task(s,s.builder_job_id);if(!task){s.builder_job_id.clear();return;}
+        builder_progress(s);const auto& job=s.job_status;
+        if(task->status=="running")task->status=job.state==ServiceState::succeeded?"completed":job.state==ServiceState::cancelled?"cancelled":"failed";
+        task->error=builder_error(job.error);
+        // A finished worker never retains live task ownership, even when a
+        // malformed/oversized metadata envelope or checked save is rejected.
+        ++s.builder_action_revision;s.builder_job_id.clear();modified(s);
+        try {
+            if(job.response){
+                const auto fallback=bounded_builder_result(job,true);task->result_json=fallback;
+                try{json::Value::Object result;for(const auto* name:{"ok","text","sources","provenance","events","usage","error","error_code","scribble","evaluation"})if(const auto* value=job.response->find(name))result[name]=std::string_view(name)=="sources"?source_metadata(*value):*value;
+                    const auto encoded=json::stringify(result,128*1024);const auto task_id=task->id;auto candidate=s.chat.state.builder;builder_task_candidate(candidate,task_id).result_json=encoded;compact_builder_results(candidate);validate_builder_state(candidate);s.chat.state.builder=std::move(candidate);task=builder_task(s,task_id);
+                }catch(const std::exception&){task->result_json=fallback;}
+            }
+            compact_builder_results(s.chat.state.builder);validate_builder_state(s.chat.state.builder);save_state(s);
+            if(job.state==ServiceState::failed)failure(s.chat.path.generic_string()+": "+(task->error.empty()?std::string("Builder task failed."):task->error));else success(s.chat.path.generic_string()+": builder task "+task->status+"; settings and results retained.");
+        }catch(const std::exception& e){failure(s.chat.path.generic_string()+": "+e.what()+" Builder task retained in memory.");}
+    }
     void finish_job(Session& s) {
+        if(!s.builder_job_id.empty()){finish_builder(s);return;}
         const auto path=s.chat.path.generic_string();const auto& job=s.job_status;
         const auto* response=job.response?&*job.response:nullptr;
         auto text=response?string_field(*response,"text"):std::string{};
@@ -877,33 +962,96 @@ struct Application::Impl {
         }
         catch(const std::exception& e){failure(path+": "+e.what()+(!text.empty()?" Response retained in the chat buffer.":" Current changes retained in memory."));}
     }
-    void cancel_job(Session& s) {s.job_status=s.job.cancel();finish_job(s);}
+    void cancel_job(Session& s,const std::string& builder_status="cancelled") {if(auto* task=builder_task(s,s.builder_job_id))task->status=builder_status;s.job_status=s.job.cancel();finish_job(s);}
     void refresh_git() {if(auto* s=session())if(!s->git.running())s->git.start(workspace->files().directory(s->chat.path.parent_path().empty()?std::filesystem::path("."):s->chat.path.parent_path()),workspace->root());}
     void start_terminal() {
         auto* s=session();if(!s)throw std::runtime_error("Open a chat before starting its terminal.");
         if(!s->terminal.running()){s->terminal.start(workspace->files().directory(s->chat.state.cwd));s->terminal_identity=++task_identity;s->terminal_status=s->terminal.drain();if(!s->terminal_status.error.empty())throw std::runtime_error(s->terminal_status.error);}
     }
-    void build_dialog() {
-        if(!session())throw std::runtime_error("Open a chat to own the builder task.");
-        auto path=directory;if(const auto* entry=selected_entry())path=entry->path;
-        fields["builder.paths"]=path.generic_string();fields["builder.output"]=".zzz_compendium/scribbles/"+(path=="."?std::string("project"):path.filename().string());
-        fields["builder.label"]=path.filename().string();fields["builder.model"].clear();
-        fields["builder.small_model"].clear();fields["builder.ai"]="true";fields["builder.web"]="false";fields["builder.kimi_ceiling"]="false";fields["builder.max_calls"]="32";fields["builder.questions"]="What are the main responsibilities of this project?";modal="builder";
+    std::string builder_default_output() const {
+        const auto paths=lines(fields.at("builder.paths"));
+        const auto path=paths.size()==1?std::filesystem::path(paths.front()).lexically_normal():std::filesystem::path{};
+        const auto name=paths.size()==1&&!path.filename().empty()&&path!="."?path.filename().string():paths.size()==1?std::string("project"):std::string("sources");
+        return ".zzz_compendium/"+fields.at("builder.kind")+"/"+name;
+    }
+    void new_builder_setup(bool from_selector=false) {
+        auto* s=session();if(!s)throw std::runtime_error("Open a chat to own the builder task.");
+        auto path=from_selector?std::filesystem::path("."):directory;if(!from_selector)if(const auto* entry=selected_entry())path=entry->path;
+        fields["builder.paths"]=path.generic_string();fields["builder.kind"]=from_selector&&selector_kind=="refs"?"refs":"scribbles";
+        fields["builder.default_output"]=fields["builder.output"]=builder_default_output();
+        fields["builder.label"]=path=="."?workspace->root().filename().string():path.filename().string();fields["builder.model"].clear();fields["builder.model_choice"].clear();
+        fields["builder.small_model"].clear();fields["builder.ai"]="false";fields["builder.web"]="false";fields["builder.evaluation"]="false";fields["builder.kimi_ceiling"]="false";fields["builder.max_calls"]="32";fields["builder.questions"]="What are the main responsibilities of this project?";
+        s->chat.state.builder.tab="Setup";retain_builder_fields();++s->builder_setup_revision;++s->builder_action_revision;
+    }
+    void build_dialog(bool from_selector=false) {
+        auto* s=session();if(!s)throw std::runtime_error("Open a chat to own the builder task.");
+        if(s->chat.state.builder.fields.empty())new_builder_setup(from_selector);
+        s->chat.state.builder.active=true;modal.clear();error=false;modified(*s);save_state(*s);success("Scribble builder opened. Setup and tasks are retained until you explicitly change them.");
+    }
+    void launch_builder(Session& s,BuilderTask& task,bool resume=false) {
+        if(s.job.running())throw std::runtime_error("This chat already has a running task. Pause or finish it before starting another.");
+        auto input=json::parse(task.request_json);auto& out=input.object();
+        const auto saved_root=std::filesystem::path(string_field(input,"root")).lexically_normal();
+        if(string_field(input,"operation")!=task.operation||saved_root!=workspace->root().lexically_normal()||std::filesystem::path(string_field(input,"chat_path")).lexically_normal()!=s.chat.path.lexically_normal())
+            throw std::runtime_error("This saved task belongs to another root or chat. Choose New task and build explicitly for this chat.");
+        if(task.operation=="scribble"){out["stream"]=true;if(resume)out["scribble"].object()["resume"]=true;}
+        auto bounded=s.chat.state.builder;compact_builder_results(bounded,896*1024);if(builder_size(bounded)>896*1024)throw std::runtime_error("Saved task metadata is full. Remove a task record before starting or resuming work.");validate_builder_state(bounded);for(auto& retained:s.chat.state.builder.tasks)retained.result_json=builder_task_candidate(bounded,retained.id).result_json;
+        // Flush the immutable snapshot and edited setup before any worker can run.
+        const auto previous_status=task.status;task.status="running";task.error.clear();if(!resume){task.phase.clear();task.completed_chunks=task.total_chunks=task.resumed_chunks=0;task.result_json="{}";}s.chat.state.builder.selected_task=task.id;s.chat.state.builder.tab="Tasks";modified(s);
+        try{save_state(s);}catch(const std::exception& e){task.status=previous_status;task.error=builder_error("Task did not start: "+std::string(e.what()));++s.builder_action_revision;modified(s);throw;}
+        try{s.job.start(input,workspace->root());}catch(const std::exception& e){task.status="failed";task.error=builder_error(e.what());++s.builder_action_revision;modified(s);try{save_state(s);}catch(...){}throw;}
+        s.builder_job_id=task.id;s.job_identity=++task_identity;++s.send_revision;++s.builder_action_revision;s.job_status={ServiceState::running,-1,{}, {},{},false,0};s.operation=task.operation;
+        success(resume?"Resume requested; Tasks shows progress after the saved checkpoint is validated.":task.operation=="evaluate"?"Comprehension evaluation started.":"Scribble builder started. Tasks shows progress; Exit keeps it running.");
+    }
+    std::string next_builder_task_id(Session& s) {
+        constexpr std::uint64_t maximum=9007199254740991ULL;
+        auto& next=s.chat.state.builder.next_task_id;
+        if(!next||next>maximum)throw std::runtime_error("Builder task ID limit reached. Open another chat for new tasks.");
+        while(builder_task(s,"builder-"+std::to_string(next))){if(next==maximum)throw std::runtime_error("Builder task ID limit reached. Open another chat for new tasks.");++next;}
+        const auto id="builder-"+std::to_string(next);if(next<maximum)++next;return id;
     }
     void run_builder(bool evaluate=false) {
-        auto* s=session();if(!s||s->job.running())throw std::runtime_error("Wait for the chat's running task, or cancel it first.");
-        auto input=request(evaluate?"evaluate":"scribble",s->chat.state.draft,s->chat.text,s->chat.state.ai);auto& out=input.object();
-        json::Value::Array paths;for(const auto& path:lines(fields["builder.paths"])){paths.emplace_back(path);if(std::filesystem::path(path).is_absolute())out["allowed_context_paths"].array().emplace_back(path);}
+        auto* s=session();if(!s||s->job.running())throw std::runtime_error("Wait for the chat's running task, or pause it first.");
+        if(s->chat.state.builder.tasks.size()>=32)throw std::runtime_error("This chat retains 32 builder tasks. Remove a task record or open another chat for additional tasks.");
+        const bool ai_enabled=fields["builder.ai"]=="true",uses_ai=evaluate||ai_enabled,uses_research=ai_enabled&&!evaluate&&fields["builder.web"]=="true";
+        const auto& selector=s->chat.state.selector;const auto context_bytes=static_cast<std::size_t>(selector.context_max_kib)*1024;
+        json::Value input=json::Value::Object{{"schema_version",1},{"operation",evaluate?"evaluate":"scribble"},{"root",workspace->root().string()},{"chat_path",s->chat.path.generic_string()},{"prompt",std::string{}},
+            {"selector",json::Value::Object{{"deep_research",uses_research},{"calculations",false},{"scribbles",json::Value::Array{}},{"refs",json::Value::Array{}},{"tools",json::Value::Array{}}}},
+            {"allowed_context_paths",json::Value::Array{}},{"context_limits",json::Value::Object{{"max_total_bytes",context_bytes},{"max_file_bytes",std::min(context_bytes,std::size_t(4*1024*1024))},{"max_files",128}}},{"research_source",selector.research_source}};
+        auto& out=input.object();
+        if(uses_research&&selector.research_source=="local"){json::Value::Array paths;for(const auto* list:{&selector.scribbles,&selector.refs})for(const auto& value:*list)if(value.enabled){paths.emplace_back(value.path);if(std::filesystem::path(value.path).is_absolute())out["allowed_context_paths"].array().emplace_back(value.path);}out["research_paths"]=std::move(paths);}
+        if(uses_research&&selector.research_source=="kiwix"&&!selector.kiwix_index.empty()){out["kiwix_index"]=selector.kiwix_index;if(std::filesystem::path(selector.kiwix_index).is_absolute())out["allowed_context_paths"].array().emplace_back(selector.kiwix_index);}
+        json::Value::Array paths;if(!evaluate)for(const auto& path:lines(fields["builder.paths"])){paths.emplace_back(path);if(std::filesystem::path(path).is_absolute())out["allowed_context_paths"].array().emplace_back(path);}
         if(!evaluate&&paths.empty())throw std::runtime_error("Add at least one input path.");
-        out["input_paths"]=std::move(paths);out["output_dir"]=trim(fields["builder.output"]);
-        auto settings=s->chat.state.ai;if(settings.provider!="openrouter")settings.endpoint.clear();settings.provider="openrouter";settings.routing_providers.clear();settings.model=fields[evaluate?"builder.small_model":"builder.model"];settings.web_search=false;
-        if(evaluate||fields["builder.ai"]=="true"){if(trim(settings.model).empty())throw std::runtime_error(evaluate?"Choose a small model for comprehension evaluation.":"Choose a Scribble model before building AI annotations.");validate_submission_model(settings);}
-        out["settings"]=settings_json(settings);if(settings.model=="moonshotai/kimi-k3"){if(fields["builder.kimi_ceiling"]!="true")throw std::runtime_error("Kimi K3 needs the explicit higher price ceiling. Choose a lower cost model or enable the $20/M ceiling.");out["settings"].object()["max_price_per_million"]=20.0;}out["selector"].object()["deep_research"]=fields["builder.web"]=="true";out["scribble"]=json::Value::Object{{"ai_enabled",fields["builder.ai"]=="true"},{"label",fields["builder.label"]},{"max_provider_calls",integer(fields["builder.max_calls"],1,4096)}};
+        if(!evaluate)out["input_paths"]=std::move(paths);
+        out["output_dir"]=trim(fields["builder.output"]);
+        auto settings=s->chat.state.ai;if(settings.provider!="openrouter"||(!settings.endpoint.empty()&&settings.endpoint!="https://openrouter.ai/api/v1"))settings.endpoint.clear();settings.provider="openrouter";settings.routing_providers.clear();settings.model=uses_ai?trim(fields[evaluate?"builder.small_model":"builder.model"]):std::string{};settings.web_search=false;
+        if(uses_ai){if(settings.model.empty())throw std::runtime_error(evaluate?"Choose a small model for comprehension evaluation.":"Choose a Scribble model before building AI annotations.");validate_submission_model(settings);if(model_search_text(settings.model).starts_with("openai/"))throw std::runtime_error("OpenAI models are not allowed for Scribble generation or evaluation.");}
+        out["settings"]=settings_json(settings);if(!uses_ai)out["settings"].object()["network_enabled"]=false;
+        if(uses_ai&&settings.model=="moonshotai/kimi-k3"){if(fields["builder.kimi_ceiling"]!="true")throw std::runtime_error("Kimi K3 needs the explicit higher price ceiling. Choose a lower cost model or enable the $20/M ceiling.");out["settings"].object()["max_price_per_million"]=20.0;}
+        out["scribble"]=json::Value::Object{{"ai_enabled",ai_enabled},{"label",fields["builder.label"]},{"max_provider_calls",ai_enabled&&!evaluate?integer(fields["builder.max_calls"],1,4096):32}};
         out["research_limits"]=json::Value::Object{{"max_queries",2},{"max_results",3}};
-        if(fields["builder.web"]=="true")out["research_queries"]=json::Value::Array{fields["builder.label"].empty()?std::string("Linux manual documentation"):fields["builder.label"]};
+        if(uses_research)out["research_queries"]=json::Value::Array{fields["builder.label"].empty()?std::string("Linux manual documentation"):fields["builder.label"]};
         if(evaluate){json::Value::Array questions;for(auto& question:lines(fields["builder.questions"]))questions.emplace_back(std::move(question));out["questions"]=std::move(questions);}
-        s->job.start(input,workspace->root());s->job_identity=++task_identity;++s->send_revision;s->job_status={ServiceState::running,-1,{}, {},{},false,0};s->operation=evaluate?"evaluate":"scribble";
-        modal.clear();success(evaluate?"Comprehension evaluation started.":"Scribble builder started.");
+        retain_builder_fields();BuilderTask task;task.id=next_builder_task_id(*s);task.operation=evaluate?"evaluate":"scribble";task.label=fields["builder.label"].empty()?fields["builder.output"]:fields["builder.label"];task.request_json=json::stringify(input,64*1024);auto candidate=s->chat.state.builder;candidate.tasks.push_back(std::move(task));compact_builder_results(candidate,896*1024);if(builder_size(candidate)>896*1024)throw std::runtime_error("Saved task metadata is full. Remove a task record or open another chat before building.");validate_builder_state(candidate);s->chat.state.builder=std::move(candidate);
+        launch_builder(*s,s->chat.state.builder.tasks.back());
+    }
+    void builder_task_action(std::string_view action) {
+        auto* s=session();auto* task=selected_builder_task();if(!s||!task)throw std::runtime_error("Select a builder task first.");
+        if(action=="remove"){if(task->status=="running"||s->builder_job_id==task->id)throw std::runtime_error("Pause or finish this task before removing its record.");const auto id=task->id;auto& builder=s->chat.state.builder;builder.tasks.erase(std::remove_if(builder.tasks.begin(),builder.tasks.end(),[&](const auto& value){return value.id==id;}),builder.tasks.end());builder.selected_task=builder.tasks.empty()?std::string{}:builder.tasks.back().id;++s->builder_action_revision;modified(*s);save_state(*s);success("Task record removed; output and checkpoint files retained.");return;}
+        if(action=="show"){s->chat.state.builder.tab="Results";modified(*s);++s->builder_action_revision;return;}
+        if(action=="pause"||action=="cancel"){if(s->builder_job_id!=task->id||!s->job.running())throw std::runtime_error("This task is not running.");cancel_job(*s,action=="pause"&&task->operation=="scribble"?"paused":"cancelled");return;}
+        if(action=="resume"){
+#if defined(_WIN32)
+            if(task->status!="ready")throw std::runtime_error("Durable Scribble Resume is unavailable on Windows; create a new task with a fresh output directory.");
+#endif
+            if(task->operation!="scribble"||(task->status!="ready"&&task->status!="paused"&&task->status!="interrupted"&&task->status!="failed"))throw std::runtime_error("Select a paused or interrupted Scribble build to resume.");
+            launch_builder(*s,*task,task->status!="ready");return;}
+        if(action=="retry"){if(task->operation!="evaluate"||task->status=="running")throw std::runtime_error("Select a completed or interrupted evaluation to retry explicitly.");if(s->chat.state.builder.tasks.size()>=32)throw std::runtime_error("This chat retains 32 builder tasks.");auto retry=*task;retry.id=next_builder_task_id(*s);retry.status="ready";auto candidate=s->chat.state.builder;candidate.tasks.push_back(std::move(retry));compact_builder_results(candidate,896*1024);if(builder_size(candidate)>896*1024)throw std::runtime_error("Saved task metadata is full. Remove a task record or open another chat before retrying.");validate_builder_state(candidate);s->chat.state.builder=std::move(candidate);launch_builder(*s,s->chat.state.builder.tasks.back());return;}
+        if(task->operation!="scribble"||task->status!="completed")throw std::runtime_error("Select a completed Scribble build first.");
+        const auto request=json::parse(task->request_json);const auto path=string_field(request,"output_dir");if(path.empty())throw std::runtime_error("This retained task has no output directory.");
+        if(action=="open"){file_buffer=std::make_unique<foundation::editor::CodeBuffer>(workspace->files().read((std::filesystem::path(path).is_absolute()?std::filesystem::path(path).lexically_relative(workspace->root()):std::filesystem::path(path)).lexically_normal()/"scribbles.md"));fields["file.text"]=file_buffer->text();++file_edit_revision;modal="file";return;}
+        auto& list=action=="refs"?s->chat.state.selector.refs:s->chat.state.selector.scribbles;auto found=std::find_if(list.begin(),list.end(),[&](const auto& value){return value.path==path;});if(found==list.end())list.push_back({path,true});else found->enabled=true;modified(*s);save_state(*s);success("Output directory enabled in Selector's "+std::string(action=="refs"?"Refs":"Scribbles")+" list.");
     }
     void transcription_dialog() {
         const auto* entry=selected_entry();if(!entry||entry->directory||entry->symlink)throw std::runtime_error("Select an ordinary WAV audio file first.");
@@ -988,8 +1136,8 @@ struct Application::Impl {
             else if(target->kind==TaskKind::guardrail){guardrail_status=guardrail_job.cancel();success("Guardrail request cancelled. Load status before changing it.");}
             else {auto& s=*sessions.at(target->path);if(target->kind==TaskKind::job)cancel_job(s);else {s.terminal.shutdown();s.terminal_status=s.terminal.drain();success(target->path+": terminal stopped.");}}
         }else {
-            if(target->kind==TaskKind::models||target->kind==TaskKind::guardrail){state().right_tab="AI";if(auto* s=session())modified(*s);}
-            else {open_chat(target->path);state().left_tab="Running Tasks";state().center_tab=target->kind==TaskKind::terminal?"Bash Terminal":"Chat Markdown";if(auto* s=session())modified(*s);}
+            if(target->kind==TaskKind::models||target->kind==TaskKind::guardrail)show_ai();
+            else {open_chat(target->path);state().left_tab="Running Tasks";state().center_tab=target->kind==TaskKind::terminal?"Bash Terminal":"Chat Markdown";if(auto* s=session()){if(target->kind==TaskKind::job&&(s->operation=="scribble"||s->operation=="evaluate")){s->chat.state.builder.active=true;s->chat.state.builder.tab="Tasks";}modified(*s);}}
         }
         modal.clear();context_task.reset();++task_action_revision;
     }
@@ -1032,7 +1180,8 @@ struct Application::Impl {
         else if(id=="actions.delete")entry_operation(true);
         else if(id=="delete.accept")mutate_entry();
         else if(id=="wb.file.cd"){const auto* entry=selected_entry();const auto path=entry?(entry->directory?entry->path:entry->path.parent_path()):directory;state().cwd=path.empty()?".":path.generic_string();start_terminal();session()->terminal.send("cd -- "+quote_shell(workspace->files().directory(state().cwd).string()));state().center_tab="Bash Terminal";modal.clear();}
-        else if(id=="wb.file.scribble")build_dialog();
+        else if(id=="wb.file.scribble"||id=="wb.files.builder")build_dialog();
+        else if(id=="selector.builder")build_dialog(true);
         else if(id=="wb.file.transcribe")transcription_dialog();
         else if(id=="wb.send")send();
         else if(id=="wb.retry")send(true);
@@ -1074,6 +1223,10 @@ struct Application::Impl {
         else if(id=="snippet.delete"){auto& items=snippets();items.erase(std::remove_if(items.begin(),items.end(),[&](const auto& item){return item.id==snippet_id;}),items.end());workspace->save_snippets(snippet_kind,items);snippet_id.clear();fields["snippet.title"].clear();fields["snippet.text"].clear();}
         else if(id=="prompt.accept")accept_prompt();
         else if(id=="modal.cancel"||id=="prompt.cancel"){modal.clear();context_task.reset();}
+        else if(id.starts_with("tab.builder.")){state().builder.tab=std::string(id.substr(12));if(owner)++owner->builder_action_revision;}
+        else if(id=="builder.exit"){state().builder.active=false;if(owner){++owner->builder_action_revision;modified(*owner);save_state(*owner);}success("Exited Scribble builder; setup, task records and running work retained.");}
+        else if(id=="builder.new"){new_builder_setup();success("New task setup opened. Retained tasks are available in Tasks.");}
+        else if(id.starts_with("builder.task."))builder_task_action(id.substr(13));
         else if(id=="builder.run")run_builder();
         else if(id=="builder.evaluate")run_builder(true);
         else if(id=="transcription.run")transcribe();
@@ -1122,7 +1275,8 @@ struct Application::Impl {
             button("wb.up","Up",{x,y,48,28},"wb.left");button("wb.back","Back",{x+52,y,52,28},"wb.left");input("wb.path","Project directory",{x+110,y,w-110,28},false,false,"wb.left");y+=36;
             if(state().left_tab=="Files") {
                 std::vector<std::pair<std::string,std::string>> rows;for(std::size_t i=0;i<tree.size();++i){const auto& entry=tree[i];rows.push_back({entry.path.generic_string(),std::string(tree_rows[i].second*2,' ')+(entry.directory?(expanded.contains(entry.path.generic_string())?"▾ ":"▸ "):"  ")+entry.name+(entry.symlink?" [link]":"")});}
-                auto& files=list("wb.files","Folder tree",{x,y,w,std::max(32.0,bottom-y-36)},rows,selected_file,"wb.left");files.spec.context_input=true;
+                auto& files=list("wb.files","Folder tree",{x,y,w,std::max(32.0,bottom-y-71)},rows,selected_file,"wb.left");files.spec.context_input=true;
+                auto& builder=button("wb.files.builder","Build Scribble / Ref…",{x,bottom-63,w,28},"wb.left");builder.state.enabled=session()&&(!selected_entry()||!selected_entry()->symlink);builder.state.help=session()?"Build from the selected file or folder, or this directory. Enter the Scribble builder workspace; choose local indexing or AI explicitly.":"Choose or open a chat to own the builder task.";
                 button("wb.file.open","Open",{x,bottom-28,w*.45,28},"wb.left");button("wb.file.actions","Actions…",{x+w*.45+4,bottom-28,w*.55-4,28},"wb.left");
             }else {std::vector<DiskSector> entries;for(const auto& entry:usage.entries)entries.push_back({entry.path.generic_string(),entry.bytes,entry.directory});auto rendered=disk.render(entries,{x,y,w,std::max(32.0,bottom-y)},selected_file);view.widgets.insert(view.widgets.end(),std::make_move_iterator(rendered.begin()),std::make_move_iterator(rendered.end()));}
         }else {
@@ -1221,7 +1375,10 @@ struct Application::Impl {
     void draw_right(gui::Rect area) {
         pane("wb.right",area);tabs("tab.right.",{"Git","Sources","Selector","Pseudocode","Prompts","AI"},{area.x,area.y,area.width,31},state().right_tab,"wb.right");
         const auto x=area.x+8,w=area.width-16;double y=area.y+40;const auto bottom=area.y+area.height-8;
-        if(!session()&&state().right_tab!="AI"){label("right.empty","Choose a chat for its settings and sources.",{x,y,w,60},"wb.right");return;}
+        if(state().right_tab=="Selector") {
+            auto& builder=button("selector.builder","Build Scribble / Ref…",{x,y,w,29},"wb.right");builder.state.enabled=bool(session());builder.state.help=session()?"Build a local source index or explicitly choose AI annotations. Starts from the project root.":"Choose or open a chat to own the builder task.";y+=36;
+        }
+        if(!session()&&state().right_tab!="AI"){label("right.empty","Choose a chat for its settings, sources and builder tasks.",{x,y,w,60},"wb.right");return;}
         auto* s=session();
         if(state().right_tab=="Git") {
             button("wb.git.refresh","Refresh",{x,y,80,28},"wb.right");label("git.branch",s->git_status.branch,{x+87,y,w-87,28},"wb.right");y+=36;
@@ -1230,9 +1387,11 @@ struct Application::Impl {
         }else if(state().right_tab=="Sources") {
             std::string text=s->source_report.empty()?"No web sources have been collected for this session.\n":s->source_report;
             text+="\nEnabled context paths:\n";for(const auto* group:{&state().selector.scribbles,&state().selector.refs,&state().selector.tools})for(const auto& path:*group)if(path.enabled)text+="• "+path.path+"\n";
+            text+="\nCode: "+std::string(state().selector.calculations?"enabled":"off")+" for this chat.\n";
             text+="\nWeb research uses the chat's selected scope. Retrieved text is evidence and cannot change tool permissions.\n";
             fields["wb.sources"]=std::move(text);input("wb.sources","Source provenance",{x,y,w,bottom-y},true,true,"wb.right");
         }else if(state().right_tab=="Selector") {
+            auto& code=checkbox("selector.calculations","Code",{x,y,w,28},state().selector.calculations,"wb.right");code.state.help="Allow bounded Python-shaped algorithms on numeric arrays, including functions, bounded loops, bitwise operations and scalar array updates. No imports, files, network or shell.";y+=35;
             label("selector.deep.label","Deep Research",{x,y,w*.55,27},"wb.right");bool_choice("selector.deep","Deep Research",{x+w*.57,y,w*.43,28},state().selector.deep_research,"wb.right");y+=35;
             choice("research.source","Research source",{x,y,w,28},{{"web","Web · general search"},{"wikipedia","Wikipedia · no external links"},{"stackoverflow","Stack Overflow"},{"local","Selected local texts"},{"kiwix","Kiwix exported local index"}},state().selector.research_source,"wb.right");y+=35;
             label("research.limits.label","Maximum queries / results",{x,y,w,19},"wb.right");input("research.max_queries","Maximum research queries",{x,y+21,(w-6)*.5,28},false,false,"wb.right");input("research.max_results","Maximum research results",{x+(w+6)*.5,y+21,(w-6)*.5,28},false,false,"wb.right");y+=56;
@@ -1240,10 +1399,11 @@ struct Application::Impl {
             label("selector.context.label","Context budget (KiB)",{x,y,w,19},"wb.right");input("selector.context_kib","Maximum context KiB",{x,y+21,w,28},false,false,"wb.right");y+=56;
             choice("selector.kind","Context list",{x,y,w,28},{{"scribbles","Scribbles · expertise"},{"refs","Refs · examples"},{"tools","Tools"}},selector_kind,"wb.right");y+=34;
             std::vector<std::pair<std::string,std::string>> rows;for(const auto& path:path_list())rows.push_back({path.path,(path.enabled?"☑ ":"☐ ")+path.path});
-            list("selector.paths","Enabled context paths",{x,y,w,std::max(50.0,bottom-y-143)},rows,selector_selected,"wb.right");y=bottom-136;
+            const auto list_height=std::max(50.0,bottom-y-143);list("selector.paths","Enabled context paths",{x,y,w,list_height},rows,selector_selected,"wb.right");y+=list_height+7;
             input("selector.path","Context path",{x,y,w,29},false,false,"wb.right");y+=35;
             button("selector.add","Add",{x,y,w*.3,28},"wb.right");button("selector.toggle","Enable / disable",{x+w*.3+4,y,w*.43-4,28},"wb.right");button("selector.remove","Remove",{x+w*.73+4,y,w*.27-4,28},"wb.right");y+=36;
             button("selector.save","Save selectors",{x,y,w,29},"wb.right");label("selector.hint","Each chat retains its own enabled paths and research setting.",{x,y+34,w,33},"wb.right").state.font.tone=gui::Tone::muted;
+            for(auto& widget:view.widgets)if(widget.spec.key.id=="wb.right")widget.state.content_size.height=std::max(area.height,y+75-area.y);
         }else if(state().right_tab=="Pseudocode"||state().right_tab=="Prompts") {
 
             snippet_kind=state().right_tab;std::vector<std::pair<std::string,std::string>> rows;for(const auto& snippet:snippets())rows.push_back({snippet.id,snippet.title});
@@ -1287,9 +1447,71 @@ struct Application::Impl {
             for(auto& widget:view.widgets)if(widget.spec.key.id=="wb.right")widget.state.content_size.height=std::max(area.height,y-area.y);
         }
     }
+    void draw_builder(gui::Rect area) {
+        pane("builder.workspace",area);
+        const auto top=area.y+8;const auto controls=std::min(470.0,area.width*.48);
+        label("builder.title","Scribble builder · "+current,{area.x+16,top,area.width-controls-24,29},"builder.workspace").state.font.size=17;
+        button("builder.new","New task",{area.x+area.width-340,top,114,29},"builder.workspace");
+        button("builder.exit","Exit Scribble builder",{area.x+area.width-220,top,204,29},"builder.workspace").state.help="Return to the workbench. Running tasks continue; setup and results stay saved with this chat.";
+        tabs("tab.builder.",{"Setup","Tasks","Results"},{area.x+16,top+37,area.width-32,31},state().builder.tab,"builder.workspace");
+        const gui::Rect body{area.x+8,top+76,area.width-16,area.height-92};pane("builder.body",body);view.widgets.back().spec.parent="builder.workspace";
+        const auto x=body.x,w=body.width,y=body.y,h=body.height;
+        if(state().builder.tab=="Setup") {
+            double fy=y;
+            const auto field=[&](const char* id,const char* name,double fh=28){label(std::string(id)+".label",name,{x+14,fy,w-28,19},"builder.body");input(id,name,{x+14,fy+21,w-28,fh},fh>28,false,"builder.body").spec.text_policy.max_bytes=fh>28?64U*1024U:4096U;fy+=fh+28;};
+            label("builder.source_help","Project root: "+workspace->root().string()+"\nSource paths are relative to this root ('.' means the project), or explicit absolute paths.",{x+14,fy,w-28,62},"builder.body").state.font.tone=gui::Tone::muted;fy+=69;
+            field("builder.paths","Source files or folders (one per line)",50);
+            label("builder.kind.label","Use as",{x+14,fy,90,28},"builder.body");choice("builder.kind","Context destination kind",{x+110,fy,w-124,28},{{"scribbles","Scribble · expertise"},{"refs","Ref · examples"}},fields["builder.kind"],"builder.body");fy+=35;
+            field("builder.output","Fresh output directory inside this project");view.widgets.back().state.help=presentation_text("Output: "+(std::filesystem::path(fields["builder.output"]).is_absolute()?std::filesystem::path(fields["builder.output"]):workspace->root()/fields["builder.output"]).lexically_normal().string());field("builder.label","Knowledgebase label");view.widgets.back().spec.text_policy.max_bytes=256;
+            label("builder.mode.label","Build mode",{x+14,fy,w-28,19},"builder.body");choice("builder.ai","Build mode",{x+14,fy+21,w-28,29},{{"false","Local source index · no AI or network"},{"true","AI annotations · OpenRouter"}},fields["builder.ai"],"builder.body");fy+=57;
+            const bool ai_enabled=fields["builder.ai"]=="true",evaluation=fields["builder.evaluation"]=="true";
+            if(ai_enabled) {
+                field("builder.model","OpenRouter annotation model ID");view.widgets.back().state.placeholder="Enter an explicit publisher/model ID";
+                std::vector<std::pair<std::string,std::string>> models;std::set<std::string> model_ids;
+                if(preferences)for(const auto& model:preferences->configured_models())if(model.provider=="openrouter"&&model.endpoint==(state().ai.provider=="openrouter"?state().ai.endpoint:std::string{})&&model_ids.insert(model.model).second)models.push_back({model.model,"Configured: "+model.label});
+                if(tutorial_enabled())for(const auto& model:std::array<std::pair<const char*,const char*>,4>{{{"nvidia/nemotron-3-ultra-550b-a55b","NVIDIA Nemotron 3 Ultra"},{"deepseek/deepseek-r1-0528","DeepSeek R1 0528"},{"mistralai/mistral-large-4-0","Mistral Large 4"},{"moonshotai/kimi-k3","Kimi K3 · higher output cost"}}})if(model_ids.insert(model.first).second)models.push_back({model.first,"Example: "+std::string(model.second)});
+                if(!models.empty()){label("builder.models","Configured models / Tutorial examples (optional)",{x+14,fy,w-28,19},"builder.body");choice("builder.model_choice","Choose an annotation model",{x+14,fy+21,w-28,29},models,fields["builder.model"],"builder.body").state.placeholder="Choose explicitly, or enter an ID above";fy+=57;}
+                field("builder.max_calls","Maximum annotation model calls per attempt (1–4096)");
+                label("builder.web.label","Limited research for Build",{x+14,fy,w*.66,28},"builder.body");bool_choice("builder.web","Limited research for Build",{x+w*.7,fy,w*.27,28},fields["builder.web"]=="true","builder.body");fy+=35;
+            }
+            checkbox("builder.evaluation","Comprehension evaluation (uses OpenRouter)",{x+14,fy,w-28,28},evaluation,"builder.body").state.help="Show evaluation fields for an existing output index. Evaluation requires an explicit model and starts only with Evaluate existing.";fy+=35;
+            if(evaluation){field("builder.small_model","OpenRouter evaluation model ID");view.widgets.back().state.placeholder="Enter an explicit publisher/model ID";field("builder.questions","Evaluation questions (one per line)",50);}
+            if((ai_enabled&&fields["builder.model"]=="moonshotai/kimi-k3")||(evaluation&&fields["builder.small_model"]=="moonshotai/kimi-k3")){label("builder.kimi.label","Allow higher Kimi ceiling ($20/M)",{x+14,fy,w*.67,28},"builder.body");bool_choice("builder.kimi_ceiling","Allow higher Kimi price ceiling",{x+w*.7,fy,w*.27,28},fields["builder.kimi_ceiling"]=="true","builder.body");fy+=35;}
+            label("builder.hint",error?status:ai_enabled?"AI annotations use your OpenRouter configuration and reviewed model policy; model availability is not checked here. OpenAI models are excluded. Build starts the request.":"Local indexing retains source anchors and keywords without AI enrichment. No model or credentials needed. Build starts only when clicked.",{x+14,fy,w-28,47},"builder.body").state.font.tone=error?gui::Tone::error:gui::Tone::muted;fy+=54;
+            label("builder.output_help","Writes scribbles.md, index.json and evidence.json in a fresh directory. Existing artifacts are refused. Add the output DIRECTORY to Selector's Scribbles or Refs list and enable it to use the verified index.",{x+14,fy,w-28,62},"builder.body").state.font.tone=gui::Tone::muted;fy+=69;
+            const auto button_y=std::max(y+h-43,fy+7);button("builder.run",ai_enabled?"Build with AI":"Build local index",{x+14,button_y,143,30},"builder.body").state.enabled=!session()->job.running();double bx=x+165;if(evaluation){button("builder.evaluate","Evaluate existing",{bx,button_y,153,30},"builder.body").state.enabled=!session()->job.running();bx+=161;}for(auto& widget:view.widgets)if(widget.spec.key.id=="builder.body")widget.state.content_size.height=std::max(h,button_y+43-y);
+        }
+        else if(state().builder.tab=="Tasks") {
+            std::vector<std::pair<std::string,std::string>> rows;
+            for(const auto& task:state().builder.tasks){auto title=task.label+" · "+(task.operation=="evaluate"?std::string("evaluation"):std::string("Scribble"))+" · "+task.status;if(task.total_chunks)title+=" · "+std::to_string(task.completed_chunks)+"/"+std::to_string(task.total_chunks)+" chunks";if(task.resumed_chunks)title+=" ("+std::to_string(task.resumed_chunks)+" reused)";rows.emplace_back(task.id,std::move(title));}
+            auto& tasks=list("builder.tasks","Saved build and evaluation tasks",{x+14,y+8,w-28,std::max(60.0,h-175)},rows,state().builder.selected_task,"builder.body");tasks.spec.context_input=true;
+            const auto* task=selected_builder_task();const bool running=task&&session()->builder_job_id==task->id&&session()->job.running(),resumable=task&&task->operation=="scribble"&&(task->status=="ready"||task->status=="paused"||task->status=="interrupted"||task->status=="failed");
+            std::string hint=task?(task->phase.empty()?task->status:task->status+" · "+task->phase):"Build and evaluation records stay with this chat. Select a task to manage it.";if(task&&!task->error.empty())hint+="\n"+task->error;
+            label("builder.task.status",hint,{x+14,y+h-158,w-28,68},"builder.body").state.font.tone=task&&task->status=="failed"?gui::Tone::error:gui::Tone::muted;
+            const auto bw=(w-58)/6;double bx=x+14;const auto row=[&](const char* id,const char* name,bool enabled){button(id,name,{bx,y+h-81,bw,30},"builder.body").state.enabled=enabled;bx+=bw+6;};
+            row("builder.task.pause",task&&task->operation=="evaluate"?"Cancel evaluation":"Pause",running);row("builder.task.resume",task&&task->status=="ready"?"Start saved Scribble":"Resume Scribble",resumable&&!session()->job.running());view.widgets.back().state.help="Resume uses this task's saved request and completed annotations. An unfinished interrupted provider request may run again; the call limit applies per attempt.";
+#if defined(_WIN32)
+            if(task&&task->status!="ready"){view.widgets.back().state.enabled=false;view.widgets.back().state.help="Durable Scribble Resume requires qualified POSIX filesystem operations and is unavailable on Windows. Create a new task with a fresh output directory.";}
+#endif
+            row("builder.task.retry","Retry evaluation",task&&task->operation=="evaluate"&&!running&&!session()->job.running());row("builder.task.show","Show Results",bool(task));row("builder.task.cancel","Cancel task",running);row("builder.task.remove","Remove record",task&&task->status!="running");view.widgets.back().state.help="Remove only this saved task record. Output directories and durable checkpoint files remain on disk.";
+            label("builder.tasks.help","Scribble Pause keeps completed chunks for explicit Resume. Evaluation retry starts a new retained task. Closing the app interrupts work; reopening starts no tasks.",{x+14,y+h-43,w-28,40},"builder.body").state.font.tone=gui::Tone::muted;
+        }else {
+            const auto* task=selected_builder_task();
+            if(!task){label("builder.results.empty","Select a task in Tasks, then choose Show Results.",{x+14,y+14,w-28,60},"builder.body");return;}
+            std::string text=task->label+" · "+task->operation+" · "+task->status+"\n";
+            if(!task->phase.empty())text+="Phase: "+task->phase+"\n";
+            if(task->total_chunks)text+="Chunks: "+std::to_string(task->completed_chunks)+" / "+std::to_string(task->total_chunks)+"; reused: "+std::to_string(task->resumed_chunks)+"\n";
+            const auto request=json::parse(task->request_json),result=json::parse(task->result_json);const auto output=string_field(request,"output_dir");text+="Output directory: "+output+"\n\n"+string_field(result,"text");if(!task->error.empty())text+="\n\n"+task->error;
+            if(const auto* omitted=result.find("omitted");omitted&&omitted->boolean())text+="\n\n[Additional result metadata omitted from the saved task; output artifacts remain in the directory above.]";
+            fields["builder.result.text"]=std::move(text);input("builder.result.text","Retained builder result",{x+14,y+8,w-28,std::max(60.0,h-96)},true,true,"builder.body");
+            const bool completed=task->operation=="scribble"&&task->status=="completed";const auto bw=(w-40)/3;
+            button("builder.task.open","View generated Scribble",{x+14,y+h-79,bw,30},"builder.body").state.enabled=completed;button("builder.task.scribbles","Use as Scribble",{x+20+bw,y+h-79,bw,30},"builder.body").state.enabled=completed;button("builder.task.refs","Use as Ref",{x+26+bw*2,y+h-79,bw,30},"builder.body").state.enabled=completed;
+            label("builder.results.help","Use output explicitly enables its DIRECTORY in this chat's Selector. Task requests and result records stay retained.",{x+14,y+h-41,w-28,38},"builder.body").state.font.tone=gui::Tone::muted;
+        }
+    }
     void draw_modal(double width,double height) {
-        const bool builder=modal=="builder",file=modal=="file";
-        const double w=std::min(width-32,file?1050.0:builder?790.0:650.0),h=std::min(height-80,file?height-110:builder?710.0:modal=="transcription"?440.0:modal=="actions"?592.0:modal=="task-actions"?275.0:modal=="discard-retained"?285.0:220.0),x=(width-w)/2,y=(height-h)/2;
+        const bool file=modal=="file";
+        const double w=std::min(width-32,file?1050.0:650.0),h=std::min(height-80,file?height-110:modal=="transcription"?440.0:modal=="actions"?592.0:modal=="task-actions"?275.0:modal=="discard-retained"?285.0:220.0),x=(width-w)/2,y=(height-h)/2;
         pane("modal.root",{x,y,w,h});view.modal_root=view.widgets.back().spec.key;
         auto title=[&](const std::string& text){label("modal.title",text,{x+14,y+12,w-28,27},"modal.root");};
         if(modal=="prompt") {title(fields["prompt.title"]);input("prompt.value","Project-relative path",{x+14,y+49,w-28,32},false,false,"modal.root");label("modal.message",error?status:prompt_action=="copy-retained"?"Copies the retained in-memory chat and draft to a new .chat.md file. The original conflict remains until its retained changes are explicitly discarded.":prompt_action=="new"||prompt_action=="open"?"Chat filenames end with .chat.md. Other Markdown files open in the file editor.":"Paths are relative to the workspace. Existing destinations are never overwritten.",{x+14,y+90,w-28,60},"modal.root");button("prompt.accept",prompt_action=="open"?"Open":prompt_action=="rename"?"Rename":prompt_action=="copy-file"||prompt_action=="copy-retained"?"Copy":"Create",{x+14,y+h-44,105,30},"modal.root");button("prompt.cancel","Cancel",{x+125,y+h-44,105,30},"modal.root");}
@@ -1302,7 +1524,7 @@ struct Application::Impl {
             row("actions.copy","Copy text file…")->state.enabled=entry&&!entry->directory&&!entry->symlink&&!conflict;
             if(conflict){row("actions.copy-retained","Copy retained chat and draft…");row("actions.discard-retained","Discard retained changes…");}
             row("actions.rename","Rename…")->state.enabled=entry&&!entry->symlink;row("actions.delete","Delete file / empty folder…")->state.enabled=entry&&!entry->symlink;
-            row("wb.file.cd","Bash cd here");row("wb.file.scribble","Build Scribble / Ref…");row("wb.file.transcribe","Media transcribe…")->state.enabled=entry&&!entry->directory&&!entry->symlink;
+            row("wb.file.cd","Bash cd here");auto* builder=row("wb.file.scribble","Build Scribble / Ref…");builder->state.enabled=session()&&(!entry||!entry->symlink);builder->state.help=session()?"Use this selected path or current directory as source.":"Choose or open a chat to own the builder task.";row("wb.file.transcribe","Media transcribe…")->state.enabled=entry&&!entry->directory&&!entry->symlink;
             label("actions.hint",error?status:"Folder deletion only removes an empty folder.",{x+14,fy,w-28,28},"modal.root").state.font.tone=error?gui::Tone::error:gui::Tone::muted;
             const auto button_y=std::max(y+h-43,fy+36);button("modal.cancel","Close",{x+14,button_y,100,30},"modal.root");for(auto& widget:view.widgets)if(widget.spec.key.id=="modal.root")widget.state.content_size.height=std::max(h,button_y+43-y);
         }
@@ -1332,40 +1554,31 @@ struct Application::Impl {
             button("transcription.run","Transcribe",{x+14,y+h-43,110,30},"modal.root");button("modal.cancel","Cancel",{x+130,y+h-43,100,30},"modal.root");
         }
         else if(file&&file_buffer) {title(file_buffer->path().generic_string()+(file_buffer->dirty()?" *":""));double bx=x+14;for(const auto& [id,text]:std::array<std::pair<const char*,const char*>,3>{{{"file.save","Save"},{"file.close","Close"},{"file.discard","Discard"}}}){button(id,text,{bx,y+45,79,28},"modal.root");bx+=85;}input("file.text","File text",{x+14,y+81,w-28,h-131},true,false,"modal.root");label("file.hint",error?status:"Checked saves preserve changed files on disk. Save or discard before closing.",{x+14,y+h-43,w-28,32},"modal.root").state.font.tone=error?gui::Tone::error:gui::Tone::muted;}
-        else if(builder) {
-            title("Build an annotated Scribble or Ref");double fy=y+44;
-            const auto field=[&](const char* id,const char* name,double fh=28){label(std::string(id)+".label",name,{x+14,fy,w-28,19},"modal.root");input(id,name,{x+14,fy+21,w-28,fh},fh>28,false,"modal.root");fy+=fh+28;};
-            field("builder.paths","Input paths (one per line)",65);field("builder.output","Output directory");field("builder.label","Knowledgebase label");
-            label("builder.models","Large model",{x+14,fy,w-28,19},"modal.root");choice("builder.model","Scribble model",{x+14,fy+22,w-28,29},{{"nvidia/nemotron-3-ultra-550b-a55b","NVIDIA Nemotron 3 Ultra"},{"deepseek/deepseek-r1-0528","DeepSeek R1 0528"},{"mistralai/mistral-large-4-0","Mistral Large 4"},{"moonshotai/kimi-k3","Kimi K3 · higher output cost"}},fields["builder.model"],"modal.root").state.placeholder="Choose a model";fy+=58;
-            if(fields["builder.model"]=="moonshotai/kimi-k3"){label("builder.kimi.label","Allow higher Kimi ceiling ($20/M)",{x+14,fy,w*.67,28},"modal.root");bool_choice("builder.kimi_ceiling","Allow higher Kimi price ceiling",{x+w*.7,fy,w*.27,28},fields["builder.kimi_ceiling"]=="true","modal.root");fy+=35;}
-            field("builder.max_calls","Maximum annotation model calls (1–4096)");
-            label("builder.ai.label","AI annotations",{x+14,fy,w*.23,28},"modal.root");bool_choice("builder.ai","AI annotations",{x+w*.25,fy,w*.2,28},fields["builder.ai"]=="true","modal.root");label("builder.web.label","Limited web research",{x+w*.49,fy,w*.25,28},"modal.root");bool_choice("builder.web","Limited web research",{x+w*.76,fy,w*.21,28},fields["builder.web"]=="true","modal.root");fy+=37;
-            field("builder.small_model","Small model for comprehension evaluation");field("builder.questions","Evaluation questions (one per line)",50);
-            for(auto& widget:view.widgets)if(widget.spec.key.id=="builder.small_model")widget.state.placeholder="Enter a model ID";
-            label("builder.hint",error?status:"Annotations retain source anchors, commentary, cross references and diverse retrieval keywords. Web sources use the selected research source.",{x+14,fy,w-28,47},"modal.root").state.font.tone=error?gui::Tone::error:gui::Tone::muted;
-            const auto button_y=std::max(y+h-43,fy+55);button("builder.run","Build",{x+14,button_y,103,30},"modal.root");button("builder.evaluate","Evaluate existing",{x+123,button_y,153,30},"modal.root");button("modal.cancel","Cancel",{x+282,button_y,100,30},"modal.root");for(auto& widget:view.widgets)if(widget.spec.key.id=="modal.root")widget.state.content_size.height=std::max(h,button_y+43-y);
-        }
+
     }
     void publish() {
         if(stopped||adapter.closed())return;
         observe_transcript_scroll();
-        if(!session()||state().center_tab!="Pseudocode Editor"||!modal.empty())cancel_flow_drag();
+        if(!session()||state().builder.active||state().center_tab!="Pseudocode Editor"||!modal.empty())cancel_flow_drag();
         pending=true;view.widgets.clear();view.pages.clear();view.active_page.reset();view.key_bindings.clear();view.commands.clear();view.modal_root.reset();
         view.palette=theme::dark_palette();
         const auto width=std::max(900.0,view.client_size.width),height=std::max(640.0,view.client_size.height);
         view.title="tinyEnv — "+(current.empty()?std::string("AI Workbench"):presentation_text(current))+(dirty()?" *":"");
         auto& root=add(gui::Kind::group,"wb.root","",{0,0,width,height},"");root.state.content_size={width,height};
-        const auto left=std::clamp(width*.23,220.0,340.0),right=std::clamp(width*.26,270.0,390.0),middle=width-left-right-16;
-        draw_left({0,0,left,height-37});draw_center({left+8,0,middle,height-37});draw_right({left+middle+16,0,right,height-37});
+        const auto left=std::clamp(width*.23,220.0,340.0),right=right_sidebar_visible?std::clamp(width*.26,270.0,390.0):0.0,middle=width-left-right-(right_sidebar_visible?16:8);
+        if(session()&&state().builder.active)draw_builder({0,0,width,height-37});
+        else {draw_left({0,0,left,height-37});draw_center({left+8,0,middle,height-37});if(right_sidebar_visible)draw_right({left+middle+16,0,right,height-37});}
+        auto& sidebar=checkbox("wb.sidebar","Sidebar",{width-320,height-32,88,28},right_sidebar_visible);sidebar.state.enabled=bool(preferences)&&!state().builder.active;sidebar.state.help=sidebar_preference_error.empty()?"Show or hide the right settings and sources pane. Remembered across projects and restarts.":sidebar_preference_error;
         checkbox("wb.tutorial","Tutorial",{width-228,height-32,98,28},tutorial_enabled()).state.enabled=bool(preferences);
         checkbox("wb.developer","Developer",{width-126,height-32,118,28},developer_enabled()).state.enabled=bool(preferences);
         std::string visible_status=status;bool visible_error=error;
+        if(!sidebar_preference_error.empty()){visible_status+=" "+sidebar_preference_error;visible_error=true;}
         for(const auto& [path,s]:sessions)if(s->save_conflict){visible_status=(!error&&!status.empty()?status+" ":std::string{})+"Autosave conflict in "+path+"; edits retained in memory. "+s->save_error;visible_error=true;if(path==current)break;}
-        label("wb.status",visible_status,{8,height-31,width-246,26}).state.font.tone=visible_error?gui::Tone::error:gui::Tone::muted;
+        label("wb.status",visible_status,{8,height-31,width-338,26}).state.font.tone=visible_error?gui::Tone::error:gui::Tone::muted;
         if(!modal.empty())draw_modal(width,height);
         const auto command=[&](const char* id,const char* scope){view.commands.push_back({{id,revision},true,gui::WidgetKey{scope,revision}});};
         if(modal=="file"&&file_buffer){command("file.undo","file.text");command("file.redo","file.text");}
-        else if(modal.empty()&&session()){command("wb.undo","wb.center");command("wb.redo","wb.center");}
+        else if(modal.empty()&&session()&&!state().builder.active){command("wb.undo","wb.center");command("wb.redo","wb.center");}
         const auto binding=[&](gui::ShortcutKey key,const std::string& target){if(std::any_of(view.widgets.begin(),view.widgets.end(),[&](const auto& widget){return widget.spec.key.id==target;}))view.key_bindings.push_back({key,{target,revision}});};
         if(modal=="file")binding(gui::ShortcutKey::f3,"file.save");
         const auto scoped=[&](gui::ShortcutKey key,const std::string& target,const std::string& focus,bool shift=false){
@@ -1379,13 +1592,22 @@ struct Application::Impl {
         }
         if(!modal.empty())binding(gui::ShortcutKey::escape,modal=="file"?"file.close":modal=="prompt"?"prompt.cancel":"modal.cancel");
         else if(graph.dragging())binding(gui::ShortcutKey::escape,"flow.drag.cancel");
-        std::set<std::string> active;for(auto& widget:view.widgets){auto& life=lives[widget.spec.key.id];auto compare=widget.spec;compare.key.generation=life.spec.key.generation;const auto* s=session();const auto semantic=widget.spec.key.id=="wb.flow.canvas"?flow_input_revision:widget.spec.key.id=="ai.key"||widget.spec.key.id.starts_with("ai.key.")?key_input_revision:widget.spec.key.id=="ai.models.available"?catalog_input_revision:widget.spec.key.id=="ai.models.cancel"?model_identity:s&&widget.spec.key.id=="wb.send"?s->send_revision:s&&(widget.spec.key.id=="wb.cancel"||widget.spec.key.id=="wb.retry")?s->job_identity:widget.spec.key.id.starts_with("wb.task.")||widget.spec.key.id.starts_with("task.")?task_action_revision:s&&widget.spec.key.id.starts_with("flow.")?s->flow.revision()*4096+s->selected_node:0;const auto source_revision=s&&widget.spec.key.id=="wb.flow.canvas"?s->flow.revision():0;if(life.active&&life.scene==revision&&life.semantic==semantic&&life.source_revision==source_revision&&compare==life.spec)widget.spec.key.generation=life.spec.key.generation;else widget.spec.key.generation=++widget_generation;life={widget.spec,true,revision,semantic,source_revision};active.insert(widget.spec.key.id);}
+        const auto builder_semantic=[&](const gui::Widget& widget)->std::uint64_t {
+            const auto* s=session();if(!s)return 0;
+            if(widget.spec.kind==gui::Kind::button||widget.spec.key.id=="builder.tasks"||widget.spec.key.id=="builder.result.text")return s->builder_action_revision;
+            // Typing keeps native inputs and their parent groups alive; New task replaces setup input ownership.
+            if(widget.spec.kind==gui::Kind::text||widget.spec.kind==gui::Kind::choice||widget.spec.kind==gui::Kind::toggle)return s->builder_setup_revision;
+            return 0;
+        };
+        std::set<std::string> active;for(auto& widget:view.widgets){auto& life=lives[widget.spec.key.id];auto compare=widget.spec;compare.key.generation=life.spec.key.generation;const auto* s=session();const auto semantic=widget.spec.key.id=="wb.flow.canvas"?flow_input_revision:widget.spec.key.id=="ai.key"||widget.spec.key.id.starts_with("ai.key.")?key_input_revision:widget.spec.key.id=="ai.models.available"?catalog_input_revision:widget.spec.key.id=="ai.models.cancel"?model_identity:s&&widget.spec.key.id=="wb.send"?s->send_revision:s&&(widget.spec.key.id=="wb.cancel"||widget.spec.key.id=="wb.retry")?s->job_identity:s&&(widget.spec.key.id.starts_with("builder.")||widget.spec.key.id.starts_with("tab.builder."))?builder_semantic(widget):widget.spec.key.id.starts_with("wb.task.")||widget.spec.key.id.starts_with("task.")?task_action_revision:s&&widget.spec.key.id.starts_with("flow.")?s->flow.revision()*4096+s->selected_node:0;const auto source_revision=s&&widget.spec.key.id=="wb.flow.canvas"?s->flow.revision():0;if(life.active&&life.scene==revision&&life.semantic==semantic&&life.source_revision==source_revision&&compare==life.spec)widget.spec.key.generation=life.spec.key.generation;else widget.spec.key.generation=++widget_generation;life={widget.spec,true,revision,semantic,source_revision};active.insert(widget.spec.key.id);}
         for(auto& [id,life]:lives)if(!active.contains(id))life.active=false;
         std::set<std::string> active_commands;for(auto& command:view.commands){if(command.scope)command.scope=lives.at(command.scope->id).spec.key;auto& life=command_lives[command.key.id];const auto* s=session();const auto semantic=command.key.id.starts_with("file.")?file_edit_revision:s?s->edit_revision:0;if(life.active&&life.scene==revision&&life.semantic==semantic&&life.command.scope==command.scope)command.key.generation=life.command.key.generation;else command.key.generation=++widget_generation;life={command,true,revision,semantic};active_commands.insert(command.key.id);}
         for(auto& [id,life]:command_lives)if(!active_commands.contains(id))life.active=false;
         if(view.modal_root)view.modal_root=lives.at(view.modal_root->id).spec.key;
         for(auto& binding:view.key_bindings){if(auto it=lives.find(binding.target.id);it!=lives.end()&&it->second.active)binding.target=it->second.spec.key;else if(auto cmd=command_lives.find(binding.target.id);cmd!=command_lives.end()&&cmd->second.active)binding.target=cmd->second.command.key;if(binding.focus)if(auto it=lives.find(binding.focus->id);it!=lives.end()&&it->second.active)binding.focus=it->second.spec.key;}
-        ++view.revision;adapter.present(view);restore_transcript_scroll();for(auto it=restored_selection.begin();it!=restored_selection.end();){const auto found=lives.find(it->first);if(found!=lives.end()&&found->second.active){adapter.text_selection(found->second.spec.key,it->second);it=restored_selection.erase(it);}else ++it;}pending=false;
+        ++view.revision;adapter.present(view);restore_transcript_scroll();
+        if(restore_sidebar&&right_sidebar_visible){if(sidebar_owner==current){for(const auto& [id,offset]:sidebar_scroll)if(const auto found=lives.find(id);found!=lives.end()&&found->second.active)adapter.scroll(found->second.spec.key,offset);for(const auto& [id,selection]:sidebar_selection)if(const auto found=lives.find(id);found!=lives.end()&&found->second.active)adapter.text_selection(found->second.spec.key,selection);}restore_sidebar=false;}
+        for(auto it=restored_selection.begin();it!=restored_selection.end();){const auto found=lives.find(it->first);if(found!=lives.end()&&found->second.active){adapter.text_selection(found->second.spec.key,it->second);it=restored_selection.erase(it);}else ++it;}pending=false;
     }
 };
 
@@ -1409,7 +1631,7 @@ bool Application::complete_service(gui::ServiceResult result){
 }
 void Application::shutdown()noexcept {
     if(!impl_||impl_->stopped)return;
-    for(auto& [path,s]:impl_->sessions){(void)path;try{if(s->job.running())impl_->cancel_job(*s);}catch(...){}if(s->save_due||s->chat.text!=s->chat.original.text)try{impl_->save_state(*s);}catch(...) {}}
+    for(auto& [path,s]:impl_->sessions){(void)path;try{if(s->job.running())impl_->cancel_job(*s,"interrupted");}catch(...){}if(s->save_due||s->chat.text!=s->chat.original.text)try{impl_->save_state(*s);}catch(...) {}}
     impl_->stopped=true;impl_->image_services.shutdown();impl_->image_choice.reset();
     impl_->key_draft.clear();
     impl_->graph.cancel_drag();
@@ -1422,7 +1644,7 @@ void Application::handle(gui::Event event) {
     p.observe_transcript_scroll();
     if(std::holds_alternative<gui::CloseEvent>(event)) {
         p.cancel_flow_drag();
-        try{if(p.file_buffer&&p.file_buffer->dirty())throw std::runtime_error("Save or discard the open file before closing.");for(auto& [path,s]:p.sessions){(void)path;if(s->job.running())p.cancel_job(*s);if(s->save_due||s->chat.text!=s->chat.original.text)p.save_state(*s);}shutdown();p.adapter.close();}
+        try{if(p.file_buffer&&p.file_buffer->dirty())throw std::runtime_error("Save or discard the open file before closing.");for(auto& [path,s]:p.sessions){(void)path;if(s->job.running())p.cancel_job(*s,"interrupted");if(s->save_due||s->chat.text!=s->chat.original.text)p.save_state(*s);}shutdown();p.adapter.close();}
         catch(const std::exception& e){p.failure(e.what());p.publish();}return;
     }
     if(!gui::normalize_event(p.view,event,[&](const auto& key){return p.adapter.scroll_offset(key);}))return;
@@ -1440,12 +1662,15 @@ void Application::handle(gui::Event event) {
                     else if(id=="wb.terminal.command"&&s)s->terminal_command=input.value;
                     else if(id=="wb.flow.text"&&s){const auto step=p.typing_step(*s,id,s->flow.text(),input.value);p.set_flow(*s,input.value,step);s->redo_draft.clear();}
                     else if(id=="file.text"&&p.file_buffer){p.file_buffer->set_text(input.value);++p.file_edit_revision;}
+                    else if(id.starts_with("builder.")&&s){p.retain_builder_fields();++s->builder_action_revision;}
                     else if(id=="ai.guardrail.id"){p.guardrail_loaded_id.clear();p.guardrail_fingerprint.clear();p.guardrail_action.clear();p.guardrail_enabled=false;p.guardrail_desired=false;}
                 }else if constexpr(std::is_same_v<T,gui::SubmitText>) {
                     if(id=="prompt.value")p.action("prompt.accept");else if(id=="wb.path")p.browse(p.fields[id]);else if(id=="wb.terminal.command")p.action("wb.terminal.send");else if(id=="selector.path")p.action("selector.add");
                 }else if constexpr(std::is_same_v<T,gui::ChooseOption>) {
                     const auto before=p.state();const auto value=record_value(input.id);p.fields[id]=value;
                     if(id=="selector.kind"){p.selector_kind=value;if(auto* s=p.session())s->selector_kind=value;p.selector_selected.clear();}
+                    else if(id=="builder.model_choice")p.fields["builder.model"]=value;
+                    else if(id=="builder.kind"){const auto output=p.builder_default_output();if(p.fields["builder.output"]==p.fields["builder.default_output"])p.fields["builder.output"]=output;p.fields["builder.default_output"]=output;}
                     else if(id=="research.source")p.state().selector.research_source=value;
                     else if(id=="selector.deep")p.state().selector.deep_research=value=="true";
                     else if(id=="ai.provider"){auto& ai=p.state().ai;if(ai.provider!=value){ai.provider=value;ai.model.clear();ai.endpoint.clear();p.fields["ai.model"].clear();p.fields["ai.endpoint"].clear();p.fields["ai.models.label"].clear();p.selected_model.clear();p.selected_model_provider.clear();p.selected_model_endpoint.clear();p.configured_model.clear();p.state().ai_configured=true;}p.refresh_key_status();}
@@ -1455,9 +1680,13 @@ void Application::handle(gui::Event event) {
                     else if(id=="ai.nitro")p.state().ai.nitro=value=="true";
                     else if(id=="wb.agentic")p.state().agentic=value=="true";
                     else if(id=="wb.split.path"){if(auto it=p.sessions.find(value);it!=p.sessions.end())p.fields["wb.split.text"]=it->second->chat.text;else p.fields["wb.split.text"]=p.workspace->open_chat(value).text;if(auto* s=p.session())s->split_source_dirty=true;}
+                    if(id.starts_with("builder.")){p.retain_builder_fields();if(auto* s=p.session())++s->builder_action_revision;}
                     if(auto* s=p.session();s&&s->chat.state!=before)p.modified(*s);
                 }else if constexpr(std::is_same_v<T,gui::SetChecked>) {
-                    if(id=="wb.tutorial") {
+                    if(id=="wb.sidebar"){p.set_sidebar_visible(input.value);p.success(input.value?"Sidebar shown.":"Sidebar hidden. Use Sidebar below to show it again.");}
+                    else if(id=="selector.calculations"){p.state().selector.calculations=input.value;if(auto* s=p.session())p.modified(*s);p.success(input.value?"Code enabled for this chat.":"Code disabled for this chat.");}
+                    else if(id=="builder.evaluation"){p.fields[id]=input.value?"true":"false";p.retain_builder_fields();if(auto* s=p.session())++s->builder_action_revision;}
+                    else if(id=="wb.tutorial") {
                         if(!p.preferences)throw std::runtime_error("Tutorial preferences are unavailable.");
                         p.preferences->set_tutorial_mode(input.value);
                         if(!input.value&&p.snippet_id.starts_with("builtin.")&&std::none_of(p.snippets().begin(),p.snippets().end(),[&](const auto& snippet){return snippet.id==p.snippet_id;})){p.snippet_id.clear();p.fields["snippet.title"].clear();p.fields["snippet.text"].clear();}
@@ -1471,6 +1700,7 @@ void Application::handle(gui::Event event) {
                     else if(id=="selector.paths"){p.selector_selected=value;if constexpr(std::is_same_v<T,gui::ActivateRecord>)p.action("selector.toggle");}
                     else if(id=="snippet.list")p.load_snippet(value);
                     else if(id=="ai.models.available"){const auto found=std::find_if(p.available_models.begin(),p.available_models.end(),[&](const auto& model){return model.first==value;});if(found!=p.available_models.end()){p.selected_model=value;p.selected_model_provider=p.catalog_provider;p.selected_model_endpoint=p.catalog_endpoint;p.fields["ai.model"]=value;p.fields["ai.models.label"]=found->second;p.configured_model.clear();}}
+                    else if(id=="builder.tasks"){if(auto* s=p.session();s&&p.builder_task(*s,value)){s->chat.state.builder.selected_task=value;++s->builder_action_revision;p.modified(*s);if constexpr(std::is_same_v<T,gui::ActivateRecord>)p.builder_task_action("show");}}
                     else if(id=="wb.tasks"){if(p.task_targets.contains(value)){p.selected_task=value;++p.task_action_revision;if constexpr(std::is_same_v<T,gui::ActivateRecord>)p.task_action(false,false);}}
                 }else if constexpr(std::is_same_v<T,gui::Activate>) {
                     if(id=="wb.undo"||id=="wb.redo"){if(auto* s=p.session())p.undo_text(input.source?input.source->id:s->last_edit,id=="wb.redo");}
@@ -1491,6 +1721,7 @@ void Application::handle(gui::Event event) {
                         else if(input.kind==gui::PointerKind::release){if(p.disk_press&&p.disk_press->first==input.pointer_id){const auto path=p.disk.hit_test(input.position);if(path&&*path==p.disk_press->second)p.disk_select(*path);}p.disk_press.reset();}
                         else if(input.kind==gui::PointerKind::click){if(auto path=p.disk.hit_test(input.position))p.disk_select(*path);}
                     }
+                    else if(id=="builder.tasks"&&input.kind==gui::PointerKind::context_menu){if(const auto* list=gui::find_widget(p.view,widget->target)){const auto offset=p.adapter.scroll_offset(widget->target);const auto row=static_cast<std::size_t>(std::max(0.0,input.position.y-list->state.bounds.y+offset.y)/28);if(row<list->state.records.size())if(auto* s=p.session()){s->chat.state.builder.selected_task=record_value(list->state.records[row].id);++s->builder_action_revision;p.modified(*s);}}}
                     else if(id=="wb.tasks"&&input.kind==gui::PointerKind::context_menu)p.task_context(input.position,widget->target);
                     else if(id=="wb.files"&&input.kind==gui::PointerKind::context_menu){const auto found=std::find_if(p.view.widgets.begin(),p.view.widgets.end(),[&](const auto& item){return item.spec.key.id==id;});if(found!=p.view.widgets.end()){const auto offset=p.adapter.scroll_offset(found->spec.key);const auto row=static_cast<std::size_t>(std::max(0.0,input.position.y-found->state.bounds.y+offset.y)/28);p.selected_file=row<p.tree.size()?p.tree[row].path.generic_string():std::string{};p.modal="actions";}}
                 }
@@ -1505,7 +1736,8 @@ void Application::tick() {
     update=p.poll_models()||update;update=p.poll_guardrail()||update;
     for(auto& [path,s]:p.sessions) {
         if(s->job.running()||s->job_status.state==ServiceState::running) {
-            auto next=s->job.poll();const auto state_changed=next.state!=s->job_status.state;s->job_status=std::move(next);
+            auto next=s->job.poll();const auto state_changed=next.state!=s->job_status.state,progress_changed=next.progress_revision!=s->job_status.progress_revision;s->job_status=std::move(next);
+            if(progress_changed&&!s->builder_job_id.empty()){p.builder_progress(*s);update=true;}
             if(s->job_status.finished()){p.finish_job(*s);update=true;}
             else if(s->stream_owned&&!s->stream_conflict&&s->job_status.streaming&&s->job_status.stream_revision!=s->displayed_stream_revision&&std::chrono::steady_clock::now()-s->last_stream_display>=stream_display_interval) {
                 try {const auto dirty=s->chat.text!=s->chat.original.text;const auto changed=p.replace_reply(*s,s->job_status.partial_text,"Streaming");update=(changed&&(p.transcript_visible(*s)||(!dirty&&p.dirty_visible(*s))))||update;s->displayed_stream_revision=s->job_status.stream_revision;s->last_stream_display=std::chrono::steady_clock::now();}

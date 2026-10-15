@@ -43,10 +43,10 @@ int main() {
         fails(FileFailure::invalid_path, [&] { (void)Workspace::state_path("README.md"); });
         const std::string markdown = "\xef\xbb\xbf# Research café\r\n\r\nText remains ordinary Markdown.\r\n";
         auto chat = workspace.new_chat("chats/first.chat.md", markdown);
-        check(chat.text == markdown && chat.state.cwd == "chats", "New chat changed bytes or cwd");
+        check(chat.text == markdown && chat.state.cwd == "chats" && !chat.state.selector.calculations, "New chat changed bytes, cwd or calculation opt-in");
         check(!std::filesystem::exists(root / "chats/.tinyenv"), "New chat eagerly created state");
         chat.state.draft = "Review the hypothesis\n"; chat.state.pseudocode = "repeat 3 { ask \"check\" }";
-        chat.state.selector.deep_research = true;
+        chat.state.selector.deep_research = true; chat.state.selector.calculations = true;
         chat.state.selector.scribbles = {{"knowledge/expertise.md", true}, {"external library", false}};
         chat.state.selector.refs = {{"examples/source", true}}; chat.state.selector.tools = {{"builtinTools/Web Search", false}};
         chat.state.ai = {"ollama", "http://localhost:11434", "local-model", 1536, 512, 64000, 0.35, 0.95, false, true, "auto", "medium", {"trusted-provider/model-route"}, true};
@@ -63,15 +63,19 @@ int main() {
         Workspace reopened(root);
         auto loaded = reopened.open_chat("chats/first.chat.md");
         check(loaded.text == markdown && loaded.state == chat.state, "Chat or independent window state did not roundtrip");
+        const auto loaded_document = json::parse(loaded.state_original.text);
+        check(loaded_document.find("version")->number() == 1 && loaded_document.find("selector")->find("calculations")->boolean(),
+            "Calculation opt-in changed the chat schema or was not stored as a boolean");
         check(loaded.state_original.text.find("api_key") == std::string::npos, "Sidecar included an API key field");
         auto other = workspace.new_chat("second.chat.md", "# Second\n");
         check(other.state.draft.empty() && !other.state.agentic && other.state.ai.model.empty() && other.state.cwd == ".", "New chat inherited another chat's window state");
         check(other.state.selector.research_max_queries == 8 && other.state.selector.research_max_results == 24 && other.state.selector.research_source == "web" && other.state.selector.kiwix_index.empty() && other.state.ai.routing_providers.empty() && !other.state.ai.zdr, "New chat lost interactive provider/research defaults");
-        check(other.state.selector.context_max_kib == 256, "New chat lost conservative context default");
+        check(other.state.selector.context_max_kib == 256 && !other.state.selector.calculations, "New chat lost conservative context or calculation defaults");
         check(!other.state.ai.num_predict && !other.state.ai.num_keep && !other.state.ai.num_ctx && !other.state.ai.temperature && !other.state.ai.top_p,
             "New chat acquired explicit generation defaults");
         workspace.save_state(other);
         const auto empty_state = json::parse(other.state_original.text);
+        check(!empty_state.find("selector")->find("calculations")->boolean(), "Disabled calculation opt-in was not saved explicitly");
         for (const auto* field : {"num_predict", "num_keep", "num_ctx", "temperature", "top_p"})
             check(!empty_state.find("ai")->find(field), "Unset chat generation settings were serialized");
         check(workspace.open_chat(other.path).state == other.state, "Unset chat generation settings did not roundtrip");
@@ -339,6 +343,224 @@ int main() {
             raw_write(root / invalid_cwd.state_original.path, json::stringify(json::Value::Object{{"version", 1}, {"cwd", cwd}}));
             fails(FileFailure::invalid_path, [&] { (void)workspace.open_chat(invalid_cwd.path); });
         }
+
+        // Old state never grants calculation access. Its other selector defaults
+        // remain unchanged, and the new explicit flag survives saving/restart.
+        auto calculation_chat = workspace.new_chat("calculations.chat.md", "# Calculations\n");
+        for (const auto* legacy_state : {"{\"version\":1}", "{\"version\":1,\"selector\":{}}",
+                "{\"version\":1,\"selector\":{\"deep_research\":true,\"research_source\":\"local\",\"research_max_queries\":7,\"research_max_results\":9}}"}) {
+            raw_write(root / calculation_chat.state_original.path, legacy_state);
+            calculation_chat = workspace.open_chat(calculation_chat.path);
+            check(!calculation_chat.state.selector.calculations, "Legacy chat silently enabled calculations");
+            if (!json::parse(legacy_state).find("selector"))
+                check(calculation_chat.state.selector.research_source == "web" && calculation_chat.state.selector.research_max_queries == 8 &&
+                    calculation_chat.state.selector.research_max_results == 24, "Absent legacy selector lost interactive research defaults");
+            else if (!calculation_chat.state.selector.deep_research)
+                check(calculation_chat.state.selector.research_source == "wikipedia" && calculation_chat.state.selector.research_max_queries == 2 &&
+                    calculation_chat.state.selector.research_max_results == 3, "Empty legacy selector lost curated research defaults");
+            else
+                check(calculation_chat.state.selector.research_source == "local" && calculation_chat.state.selector.research_max_queries == 7 &&
+                    calculation_chat.state.selector.research_max_results == 9, "Legacy selector settings changed during calculation migration");
+            workspace.save_state(calculation_chat);
+            check(Workspace(root).open_chat(calculation_chat.path).state == calculation_chat.state, "Legacy calculation default changed after save/restart");
+        }
+        for (const bool enabled : {true, false}) {
+            calculation_chat.state.selector.calculations = enabled; workspace.save_state(calculation_chat);
+            check(Workspace(root).open_chat(calculation_chat.path).state == calculation_chat.state, "Calculation toggle did not survive save/restart");
+        }
+        for (const auto* bad : {"null", "0", "1", "\"true\"", "[]", "{}"}) {
+            const auto bytes = std::string("{\"version\":1,\"selector\":{\"calculations\":") + bad + "}}\n";
+            raw_write(root / calculation_chat.state_original.path, bytes);
+            malformed([&] { (void)workspace.open_chat(calculation_chat.path); });
+            check(workspace.files().read(calculation_chat.state_original.path).text == bytes, "Malformed calculation flag was silently replaced");
+        }
+        const std::string foreign_calculation_state = "{\"version\":1,\"draft\":\"Foreign draft\",\"selector\":{\"calculations\":false}}\n";
+        calculation_chat.state.selector.calculations = true;
+        raw_write(root / calculation_chat.state_original.path, foreign_calculation_state);
+        fails(FileFailure::conflict, [&] { workspace.save_state(calculation_chat); });
+        check(calculation_chat.state.selector.calculations && workspace.files().read(calculation_chat.state_original.path).text == foreign_calculation_state,
+            "Calculation save conflict changed the retained opt-in or foreign state");
+
+        // Builder mode and each task belong to the owning chat. Reading state
+        // is passive: it preserves a running record for UI recovery to decide.
+        auto builder_chat = workspace.new_chat("builder.chat.md", "# Builder owner\n");
+        check(builder_chat.state.builder == BuilderState{} && !std::filesystem::exists(root / builder_chat.state_original.path),
+            "New chat acquired builder work or eager state");
+        raw_write(root / builder_chat.state_original.path, "{\"version\":1,\"draft\":\"Legacy draft\"}\n");
+        builder_chat = workspace.open_chat(builder_chat.path);
+        check(builder_chat.state.builder == BuilderState{} && builder_chat.state.draft == "Legacy draft", "Legacy chat did not retain passive builder defaults");
+        workspace.save_state(builder_chat);
+        check(!json::parse(builder_chat.state_original.text).find("builder"), "Unused builder state was serialized into a legacy chat");
+        auto& builder = builder_chat.state.builder;
+        builder.active = true; builder.tab = "Tasks"; builder.next_task_id = 3;
+        builder.fields = {{"builder.paths", "docs\nREADME.md"}, {"builder.kind", "scribbles"}, {"builder.output", ".zzz_compendium/scribbles/project"},
+            {"builder.default_output", ".zzz_compendium/scribbles/project"}, {"builder.label", "Local café"}, {"builder.model", ""},
+            {"builder.model_choice", ""}, {"builder.small_model", "example/small"}, {"builder.ai", "false"}, {"builder.web", "false"},
+            {"builder.evaluation", "false"}, {"builder.kimi_ceiling", "false"}, {"builder.max_calls", "32"}, {"builder.questions", "What is this source?"}};
+        BuilderTask build_task;
+        build_task.id = "builder.1"; build_task.label = "Local café"; build_task.status = "running"; build_task.phase = "indexing";
+        build_task.completed_chunks = 2; build_task.total_chunks = 4; build_task.resumed_chunks = 1;
+        build_task.request_json = json::stringify(json::Value::Object{
+            {"schema_version", 1}, {"operation", "scribble"}, {"root", root.string()}, {"chat_path", builder_chat.path.generic_string()}, {"prompt", ""},
+            {"settings", json::Value::Object{{"provider", "openrouter"}, {"model", ""}, {"network_enabled", false}}},
+            {"selector", json::Value::Object{{"deep_research", false}, {"calculations", false}, {"scribbles", json::Value::Array{}}, {"refs", json::Value::Array{}}, {"tools", json::Value::Array{}}}},
+            {"input_paths", json::Value::Array{"docs", "README.md"}}, {"allowed_context_paths", json::Value::Array{}}, {"output_dir", ".zzz_compendium/scribbles/project"},
+            {"research_source", "web"}, {"research_limits", json::Value::Object{{"max_queries", 2}, {"max_results", 3}}},
+            {"context_limits", json::Value::Object{{"max_total_bytes", 262144}, {"max_file_bytes", 262144}, {"max_files", 128}}},
+            {"scribble", json::Value::Object{{"ai_enabled", false}, {"label", "Local café"}, {"max_provider_calls", 32}}}});
+        BuilderTask evaluation_task;
+        evaluation_task.id = "builder.2"; evaluation_task.operation = "evaluate"; evaluation_task.status = "completed"; evaluation_task.label = "Small evaluation";
+        evaluation_task.request_json = " { \"operation\": \"evaluate\", \"questions\": [\"What is this source?\"] } ";
+        evaluation_task.result_json = json::stringify(json::Value::Object{{"operation", "evaluate"}, {"ok", true}, {"text", "Evaluation complete"},
+            {"evaluation", json::Value::Object{{"original_score", 1.0}, {"enriched_score", 1.0}}}, {"omitted", true}});
+        builder.tasks = {build_task, evaluation_task}; builder.selected_task = build_task.id;
+        workspace.save_state(builder_chat);
+        const auto builder_bytes = builder_chat.state_original.text;
+        const auto builder_reopened = Workspace(root).open_chat(builder_chat.path);
+        check(builder_reopened.state == builder_chat.state && builder_reopened.state.builder.tasks.front().status == "running" &&
+            workspace.files().read(builder_chat.state_original.path).text == builder_bytes,
+            "Restart altered task records, request text or disk state");
+        check(workspace.open_chat("second.chat.md").state.builder == BuilderState{}, "Builder state leaked into another chat");
+        for (const auto* tab : {"Setup", "Tasks", "Results"}) {
+            builder.tab = tab; workspace.save_state(builder_chat);
+            check(Workspace(root).open_chat(builder_chat.path).state.builder == builder, "Builder tab or mode did not survive restart");
+        }
+        for (const auto* status : {"ready", "running", "paused", "interrupted", "completed", "failed", "cancelled"}) {
+            builder.tasks.front().status = status; workspace.save_state(builder_chat);
+            check(Workspace(root).open_chat(builder_chat.path).state.builder.tasks.front().status == status, "Builder status did not survive restart");
+        }
+        const auto valid_builder = builder;
+        // UI preflight uses the exact save contract without assigning candidate
+        // metadata or touching the checked companion snapshot.
+        const auto preflight_snapshot = builder_chat.state_original;
+        const auto preflight_bytes = workspace.files().read(builder_chat.state_original.path).text;
+        validate_builder_state(valid_builder);
+        auto candidate_builder = valid_builder;
+        candidate_builder.tasks.front().result_json = "{\"usage\":{\"authorization\":\"synthetic\"}}";
+        const auto rejected_candidate = candidate_builder;
+        fails(FileFailure::invalid_path, [&] { validate_builder_state(candidate_builder); });
+        check(candidate_builder == rejected_candidate, "Builder preflight changed the rejected candidate");
+        candidate_builder.tasks.front().result_json = "{\"usage\":[]}";
+        malformed([&] { validate_builder_state(candidate_builder); });
+        check(builder == valid_builder &&
+            builder_chat.state_original.identity == preflight_snapshot.identity && builder_chat.state_original.text == preflight_snapshot.text &&
+            workspace.files().read(builder_chat.state_original.path).text == preflight_bytes,
+            "Builder preflight changed retained state, snapshot or disk bytes");
+        auto reject_builder = [&](FileFailure expected, const auto& change) {
+            builder = valid_builder; change(builder); const auto disk = workspace.files().read(builder_chat.state_original.path).text;
+            fails(expected, [&] { workspace.save_state(builder_chat); });
+            check(workspace.files().read(builder_chat.state_original.path).text == disk, "Invalid builder state replaced a saved sidecar");
+        };
+        reject_builder(FileFailure::invalid_path, [](auto& value) { value.tab = "Other"; });
+        reject_builder(FileFailure::invalid_path, [](auto& value) { value.selected_task = "missing"; });
+        reject_builder(FileFailure::invalid_path, [](auto& value) { value.fields["builder.api_key"] = "synthetic"; });
+        reject_builder(FileFailure::invalid_path, [](auto& value) { value.tasks.front().operation = "chat"; });
+        reject_builder(FileFailure::invalid_path, [](auto& value) { value.tasks.front().status = "complete"; });
+        reject_builder(FileFailure::invalid_path, [](auto& value) { value.tasks.front().id.clear(); });
+        reject_builder(FileFailure::invalid_path, [](auto& value) { value.tasks.front().id = "../foreign"; });
+        reject_builder(FileFailure::invalid_path, [](auto& value) { value.tasks.back().id = value.tasks.front().id; });
+        reject_builder(FileFailure::invalid_path, [](auto& value) { value.tasks.front().request_json = "{\"operation\":\"evaluate\"}"; });
+        reject_builder(FileFailure::invalid_path, [](auto& value) { value.tasks.front().result_json = "{\"operation\":\"evaluate\"}"; });
+        reject_builder(FileFailure::limit, [](auto& value) { value.next_task_id = 0; });
+        reject_builder(FileFailure::limit, [](auto& value) { value.next_task_id = 9007199254740992ULL; });
+        reject_builder(FileFailure::limit, [](auto& value) { value.tasks.front().total_chunks = 4097; });
+        reject_builder(FileFailure::limit, [](auto& value) { value.tasks.front().completed_chunks = value.tasks.front().total_chunks + 1; });
+        reject_builder(FileFailure::limit, [](auto& value) { value.tasks.front().resumed_chunks = value.tasks.front().completed_chunks + 1; });
+        reject_builder(FileFailure::limit, [](auto& value) { value.fields["builder.paths"] = std::string(65537, 'x'); });
+        reject_builder(FileFailure::limit, [](auto& value) { value.fields["builder.model"] = std::string(4097, 'x'); });
+        reject_builder(FileFailure::limit, [](auto& value) { value.tasks.front().request_json = std::string(65537, 'x'); });
+        reject_builder(FileFailure::limit, [](auto& value) { value.tasks.front().result_json = std::string(131073, 'x'); });
+        reject_builder(FileFailure::limit, [](auto& value) {
+            value.tasks.clear(); value.selected_task.clear();
+            for (int i = 0; i < 33; ++i) { BuilderTask task; task.id = "task-" + std::to_string(i); value.tasks.push_back(std::move(task)); }
+        });
+        for (const auto* unsafe : {
+            "{\"operation\":\"scribble\",\"settings\":{\"endpoint\":\"https://user:synthetic@openrouter.ai/api/v1\"}}",
+            "{\"operation\":\"scribble\",\"settings\":{\"endpoint\":\"https://openrouter.ai/api/v1?api_key=synthetic\"}}",
+            "{\"operation\":\"scribble\",\"settings\":{\"endpoint\":\"https://openrouter.ai/api/v1#synthetic\"}}",
+            "{\"operation\":\"scribble\",\"settings\":{\"Api-Key\":\"synthetic\"}}",
+            "{\"operation\":\"scribble\",\"settings\":{\"provider\":\"openrouter\",\"server_tools\":[]}}",
+            "{\"operation\":\"scribble\",\"history\":[]}", "{\"operation\":\"scribble\",\"prompt\":\"Unsent draft\"}",
+            "{\"operation\":\"scribble\",\"pseudocode\":\"\"}", "{\"operation\":\"scribble\",\"images\":[]}",
+            "{\"operation\":\"scribble\",\"selector\":{\"calculations\":true}}",
+            "{\"operation\":\"scribble\",\"selector\":{\"tools\":[{\"path\":\"tool.json\"}]}}",
+            "{\"operation\":\"scribble\",\"scribble\":{\"nativeexec\":false}}",
+            "{\"operation\":\"scribble\",\"unknown\":{}}"}) {
+            reject_builder(FileFailure::invalid_path, [&](auto& value) { value.tasks.front().request_json = unsafe; });
+        }
+        for (const auto* invalid_limit : {"{\"operation\":\"scribble\",\"scribble\":{\"max_provider_calls\":4097}}",
+                "{\"operation\":\"scribble\",\"scribble\":{\"max_files\":129}}", "{\"operation\":\"scribble\",\"scribble\":{\"max_total_bytes\":0}}",
+                "{\"operation\":\"scribble\",\"research_limits\":{\"max_queries\":1001}}", "{\"operation\":\"scribble\",\"context_limits\":{\"max_file_bytes\":4194305}}"}) {
+            reject_builder(FileFailure::limit, [&](auto& value) { value.tasks.front().request_json = invalid_limit; });
+        }
+        for (const auto* unsafe : {"{\"usage\":{\"credential_directory\":\"synthetic\"}}", "{\"usage\":{\"credential\":\"synthetic\"}}", "{\"scribble\":{\"evidence\":{\"native_exec\":false}}}",
+                "{\"history\":[]}", "{\"unknown\":{}}"}) {
+            reject_builder(FileFailure::invalid_path, [&](auto& value) { value.tasks.front().result_json = unsafe; });
+        }
+        for (const auto* bad_json : {"[]", "null", "\"object\"", "{\"operation\":\"scribble\",\"selector\":false}",
+                "{\"operation\":\"scribble\",\"settings\":{\"network_enabled\":1}}", "{\"operation\":\"scribble\",\"questions\":[{}]}"}) {
+            builder = valid_builder; builder.tasks.front().request_json = bad_json;
+            malformed([&] { workspace.save_state(builder_chat); });
+        }
+        for (const auto* bad_json : {"[]", "null", "{\"ok\":1}", "{\"omitted\":\"true\"}", "{\"schema_version\":\"1\"}", "{\"schema_version\":1.5}", "{\"sources\":{}}", "{\"usage\":[]}"}) {
+            builder = valid_builder; builder.tasks.front().result_json = bad_json;
+            malformed([&] { workspace.save_state(builder_chat); });
+        }
+        builder = valid_builder;
+        for (const auto* endpoint : {"", "https://openrouter.ai/api/v1", "https://openrouter.ai/api/v1/"}) {
+            auto saved_request = json::parse(builder.tasks.front().request_json); saved_request.find("settings")->object()["endpoint"] = endpoint;
+            builder.tasks.front().request_json = json::stringify(saved_request); workspace.save_state(builder_chat);
+            check(Workspace(root).open_chat(builder_chat.path).state.builder == builder, "Credential-free builder endpoint did not roundtrip");
+        }
+        builder = valid_builder;
+        builder.tasks.front().request_json = "{\"operation\":\"scribble\",\"research_limits\":{\"max_context_chars\":16777216,\"max_excerpt_chars\":524288,\"max_planner_calls\":0}}";
+        workspace.save_state(builder_chat);
+        check(Workspace(root).open_chat(builder_chat.path).state.builder == builder, "Runtime research limits did not roundtrip");
+        builder = valid_builder;
+        builder.next_task_id = 9007199254740991ULL; builder.tasks.front().completed_chunks = builder.tasks.front().total_chunks = builder.tasks.front().resumed_chunks = 4096;
+        workspace.save_state(builder_chat);
+        check(Workspace(root).open_chat(builder_chat.path).state.builder == builder, "Builder counter or next-ID boundary lost precision");
+        builder = valid_builder; builder.tasks.clear(); builder.selected_task.clear();
+        for (int i = 0; i < 32; ++i) { BuilderTask task; task.id = "task-" + std::to_string(i); builder.tasks.push_back(std::move(task)); }
+        workspace.save_state(builder_chat);
+        check(Workspace(root).open_chat(builder_chat.path).state.builder.tasks.size() == 32, "Maximum builder task history did not roundtrip");
+        for (auto& task : builder.tasks) task.result_json = json::stringify(json::Value::Object{{"text", std::string(40000, 'x')}});
+        malformed([&] { workspace.save_state(builder_chat); });
+        builder = valid_builder; workspace.save_state(builder_chat);
+        const auto valid_document = json::parse(builder_chat.state_original.text);
+        auto bad_saved_builder = [&](const auto& change) {
+            auto document = valid_document; change(document.find("builder")->object()); const auto bytes = json::stringify(document) + "\n";
+            raw_write(root / builder_chat.state_original.path, bytes);
+            malformed([&] { (void)workspace.open_chat(builder_chat.path); });
+            check(workspace.files().read(builder_chat.state_original.path).text == bytes, "Malformed saved builder was replaced during open");
+        };
+        for (const auto* bad : {"null", "0", "\"true\"", "[]", "{}"}) {
+            bad_saved_builder([&](auto& value) { value["active"] = json::parse(bad); });
+        }
+        for (const auto* field : {"tab", "selected_task", "fields", "tasks", "next_task_id"}) {
+            bad_saved_builder([&](auto& value) { value[field] = nullptr; });
+        }
+        for (const double number : {-1.0, 0.0, 1.5, 9007199254740992.0}) {
+            bad_saved_builder([&](auto& value) { value["next_task_id"] = number; });
+        }
+        for (const auto* field : {"id", "operation", "status", "label", "request_json", "result_json", "error", "phase", "completed_chunks", "total_chunks", "resumed_chunks"}) {
+            bad_saved_builder([&](auto& value) { value["tasks"].array().front().object()[field] = nullptr; });
+        }
+        for (const double number : {-1.0, 1.5, 4097.0}) {
+            bad_saved_builder([&](auto& value) { value["tasks"].array().front().object()["total_chunks"] = number; });
+        }
+        bad_saved_builder([](auto& value) { value["fields"].object()["builder.paths"] = false; });
+        bad_saved_builder([](auto& value) { value["unknown"] = true; });
+        bad_saved_builder([](auto& value) { value["tasks"].array().front().object().erase("request_json"); });
+        builder = valid_builder; builder.fields["builder.label"] = "Retained after conflict";
+        const auto retained_builder = builder;
+        const std::string foreign_builder_state = "{\"version\":1,\"draft\":\"Foreign builder draft\"}\n";
+        raw_write(root / builder_chat.state_original.path, foreign_builder_state);
+        fails(FileFailure::conflict, [&] { workspace.save_state(builder_chat); });
+        check(builder == retained_builder && workspace.files().read(builder_chat.state_original.path).text == foreign_builder_state,
+            "Builder save conflict lost retained mode/tasks or overwrote foreign state");
+        builder_chat = workspace.open_chat(builder_chat.path);
+        check(builder_chat.state.builder == BuilderState{} && builder_chat.state.draft == "Foreign builder draft", "Explicit reload did not adopt foreign state");
 
         // Explicit legacy values stay explicit; missing or null controls mean
         // provider defaults, including after a state save and another reopen.

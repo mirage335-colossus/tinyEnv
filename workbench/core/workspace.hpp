@@ -32,6 +32,8 @@ struct AiSettings {
 };
 struct SelectorState {
     bool deep_research{};
+    // Per-chat opt-in for the bounded calculation helper.
+    bool calculations{};
     std::vector<PathToggle> scribbles, refs, tools;
     int research_max_queries{8}, research_max_results{24};
     std::string research_source{"web"}, kiwix_index;
@@ -55,7 +57,27 @@ struct SubmittedMessage {
     std::vector<ImageAttachment> images;
     friend bool operator==(const SubmittedMessage&, const SubmittedMessage&) = default;
 };
+// Per-chat builder work is data only: reopening never launches a task. Requests
+// retain bounded, non-secret setup metadata, while artifacts stay on disk.
+struct BuilderTask {
+    std::string id, operation{"scribble"}, status{"ready"}, label;
+    std::string request_json{"{}"}, result_json{"{}"}, error, phase;
+    std::size_t completed_chunks{}, total_chunks{}, resumed_chunks{};
+    friend bool operator==(const BuilderTask&, const BuilderTask&) = default;
+};
+struct BuilderState {
+    bool active{};
+    std::string tab{"Setup"}, selected_task;
+    std::map<std::string, std::string> fields;
+    std::vector<BuilderTask> tasks;
+    std::uint64_t next_task_id{1};
+    friend bool operator==(const BuilderState&, const BuilderState&) = default;
+};
+// Validates candidate setup/tasks with the same bounds as checked chat saves.
+// Performs no filesystem access, launch or mutation; invalid metadata throws.
+void validate_builder_state(const BuilderState& builder);
 struct ChatState {
+    BuilderState builder;
     SelectorState selector;
     AiSettings ai;
     // False when AI settings follow app defaults. Legacy saved provider/model
